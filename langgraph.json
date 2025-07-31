@@ -1,0 +1,10 @@
+{
+  "dependencies": [
+    "."
+  ],
+  "graphs": {
+    "self_rag": "./src/agent/graph.py:graph"
+  },
+  "env": ".env",
+  "image_distro": "wolfi"
+}
