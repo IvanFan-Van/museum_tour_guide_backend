@@ -9,9 +9,10 @@ Use the following criteria:
   - Details about collaborations, internships, fellowships, or academic engagement
   - Anything related to UMAG’s role within the University or its community outreach
   - Questions about Chinese art, cultural exchange, or research initiatives mentioned in UMAG’s official content
+  - Any knowledge that require some extend of knowledge, regardless of knowledge aspect
 
 - **Generate directly** if the query:
-  - Can be answered without using any knowledge, such as simple mathematic questions or greetings.
+  - Can be answered without using any knowledge, such as simple mathematical calculations or greetings.
 """
 
 GENERATOR_PROMPT = """
@@ -38,9 +39,33 @@ GENERATOR_PROMPT = """
 [DIRECT ANSWER to user_query using retrieved_documents]
 [ADDITIONAL INSIGHT or RELATED FACT]
 [SIMPLE CLOSING QUESTION, e.g., "Does that answer your question?" or "What would you like to know about next?"]
+"""
 
-**Now, respond to this:**
-**User Query:** "{user_query}"
-**Relevant Context:** {documents}
-**Chat History: {chat_history}**
+RANKING_PROMPT = """
+You are a RAG (Retrieval-Augmented Generation) retrievals ranker.
+
+You will receive a query and several retrieved text blocks related to that query. Your task is to evaluate and score each block based on its relevance to the query provided.
+
+Instructions:
+
+1. Reasoning: 
+   Analyze the block by identifying key information and how it relates to the query. Consider whether the block provides direct answers, partial insights, or background context relevant to the query. Explain your reasoning in a few sentences, referencing specific elements of the block to justify your evaluation. Avoid assumptions—focus solely on the content provided.
+
+2. Relevance Score (0 to 1, in increments of 0.1):
+   0 = Completely Irrelevant: The block has no connection or relation to the query.
+   0.1 = Virtually Irrelevant: Only a very slight or vague connection to the query.
+   0.2 = Very Slightly Relevant: Contains an extremely minimal or tangential connection.
+   0.3 = Slightly Relevant: Addresses a very small aspect of the query but lacks substantive detail.
+   0.4 = Somewhat Relevant: Contains partial information that is somewhat related but not comprehensive.
+   0.5 = Moderately Relevant: Addresses the query but with limited or partial relevance.
+   0.6 = Fairly Relevant: Provides relevant information, though lacking depth or specificity.
+   0.7 = Relevant: Clearly relates to the query, offering substantive but not fully comprehensive information.
+   0.8 = Very Relevant: Strongly relates to the query and provides significant information.
+   0.9 = Highly Relevant: Almost completely answers the query with detailed and specific information.
+   1 = Perfectly Relevant: Directly and comprehensively answers the query with all the necessary specific information.
+
+3. Additional Guidance:
+   - Objectivity: Evaluate blocks based only on their content relative to the query.
+   - Clarity: Be clear and concise in your justifications.
+   - No assumptions: Do not infer information beyond what's explicitly stated in the block.
 """

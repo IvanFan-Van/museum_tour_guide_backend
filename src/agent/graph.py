@@ -1,4 +1,5 @@
 from langchain import hub
+from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from pprint import pprint
@@ -15,13 +16,18 @@ from agent.prompts import GENERATOR_PROMPT
 
 ### Generate
 # Prompt
-prompt = ChatPromptTemplate.from_template(GENERATOR_PROMPT)
-
-
-# Post-processing
-def format_docs(docs):
-    return "\n\n".join(doc.page_content for doc in docs)
-
+prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", GENERATOR_PROMPT),
+        (
+            "human",
+            "**Now, respond to this:**\n"
+            "**User Query:** '{user_query}'\n"
+            "**Relevant Context:** {documents}\n"
+            "**Chat History: {chat_history}**\n",
+        ),
+    ]
+)
 
 # Chain
 rag_chain = prompt | llm | StrOutputParser()
@@ -85,9 +91,11 @@ def generate(state):
     documents = state["documents"]
     messages = state["messages"]
 
+    chat_history = "\n\n".join([m.content for m in messages])
+
     # RAG generation
     generation = rag_chain.invoke(
-        {"documents": documents, "user_query": question, "chat_history": messages}
+        {"documents": documents, "user_query": question, "chat_history": chat_history}
     )
     return {
         "generation": generation,
@@ -100,8 +108,23 @@ def direct_generate(state):
     Generate answer without documents
     """
     question = state["question"]
-    generation = llm.invoke(question)
-    return {"generation": generation.content}
+    messages = state["messages"]
+
+    chat_history = "\n\n".join([m.content for m in messages])
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", GENERATOR_PROMPT),
+            (
+                "human",
+                "Here is the chat history: {chat_history}\n\n"
+                "Here is the user query: {question}",
+            ),
+        ]
+    )
+
+    answer_chain = prompt | llm | StrOutputParser()
+    answer = answer_chain.invoke({"question": question, "chat_history": chat_history})
+    return {"generation": answer, "messages": [answer]}
 
 
 def grade_documents(state):
@@ -117,21 +140,39 @@ def grade_documents(state):
 
     print("---CHECK DOCUMENT RELEVANCE TO QUESTION---")
     question = state["question"]
-    documents = state["documents"]
+    documents: list[Document] = state["documents"]
 
     # Score each doc
     filtered_docs = []
-    for d in documents:
-        score = GradeDocuments.model_validate(
-            retrieval_grader.invoke({"question": question, "document": d.page_content})
+
+    formatted_blocks = "\n\n---\n\n".join(
+        [
+            f'Block {i+1}:\n\n"""\n{text}\n"""'
+            for i, text in enumerate([d.page_content for d in documents])
+        ]
+    )
+
+    user_prompt = (
+        f'Here is the query: "{question}"\n\n'
+        "Here are the retrieved text blocks:\n"
+        f"{formatted_blocks}\n\n"
+        f"You should provide exactly {len(documents)} rankings, in order."
+    )
+
+    scores = GradeDocuments.model_validate(
+        retrieval_grader.invoke(
+            {
+                "user_prompt": user_prompt,
+            }
         )
-        grade = score.binary_score
-        if grade == "yes":
-            print("---GRADE: DOCUMENT RELEVANT---")
-            filtered_docs.append(d)
-        else:
-            print("---GRADE: DOCUMENT NOT RELEVANT---")
-            continue
+    )
+
+    for idx, score in enumerate(scores.block_rankings):
+        if score.relevance_score >= 0.6:
+            documents[idx].metadata["relevance_score"] = score.relevance_score
+            documents[idx].metadata["reasoning"] = score.reasoning
+            filtered_docs.append(documents[idx])
+
     return {"documents": filtered_docs, "question": question}
 
 
