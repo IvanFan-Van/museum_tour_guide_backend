@@ -11,6 +11,5 @@ Use the following criteria:
   - Questions about Chinese art, cultural exchange, or research initiatives mentioned in UMAG’s official content
 
 - **Generate directly** if the query:
-  - Can be answered using general world knowledge unrelated to UMAG’s specific operations or content
-  - Involves broad topics (e.g., “What is a museum?”) without reference to UMAG
+  - Can be answered without using any knowledge, such as simple mathematic questions or greetings.
 """
