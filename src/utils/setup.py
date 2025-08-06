@@ -1,0 +1,48 @@
+import os
+from langchain_openai import AzureOpenAIEmbeddings
+from pinecone import Pinecone, ServerlessSpec
+from dotenv import load_dotenv, find_dotenv
+from pinecone_text.sparse import BM25Encoder
+from langchain_community.retrievers import PineconeHybridSearchRetriever
+
+load_dotenv(find_dotenv())
+
+# create the index
+index_name = "umag-hybrid-search"
+pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
+if index_name not in pc.list_indexes().names():
+    pc.create_index(
+        name=index_name,
+        dimension=3072,  # dimensionality of dense model
+        metric="dotproduct",  # sparse values supported only for dotproduct
+        spec=ServerlessSpec(cloud="aws", region="us-east-1"),
+    )
+
+index = pc.Index(index_name)
+
+bm25_encoder = BM25Encoder.default()
+
+embeddings = AzureOpenAIEmbeddings(
+    azure_deployment=os.environ["AZURE_OPENAI_EMBEDDING_DEPLOYMENT"],
+    azure_endpoint=os.environ["AZURE_OPENAI_EMBEDDING_ENDPOINT"],
+)
+
+retriever = PineconeHybridSearchRetriever(
+    embeddings=embeddings, sparse_encoder=bm25_encoder, index=index, top_k=10
+)
+
+from langchain_community.document_loaders import DirectoryLoader, TextLoader
+from pathlib import Path
+
+docs_folder = Path(
+    r"D:\HKU\Inno Wing RA\UBC Exchange\code\output\Objectifying_China\docs"
+)
+loader = DirectoryLoader(
+    str(docs_folder.absolute()),
+    glob="**/*.md",
+    loader_cls=TextLoader,
+    loader_kwargs={"encoding": "utf-8"},
+)
+docs = loader.load()
+
+retriever.add_texts([d.page_content for d in docs])

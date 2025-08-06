@@ -4,7 +4,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pprint import pprint
 
 from agent.question_rewriter import question_rewriter
-from agent.bm25_retriever import bm25_retriever as retriever
+from agent.pinecone_retriever import retriever
 from agent.query_router import QueryRouting, query_router
 from agent.retrieval_grader import retrieval_grader, GradeDocuments
 from agent.hallucination_grader import hallucination_grader, GradeHallucinations
