@@ -1,126 +1,17 @@
-import os
-from pathlib import Path
-from unicodedata import category
-
 from langchain import hub
 from langchain_core.output_parsers import StrOutputParser
-from dotenv import load_dotenv, find_dotenv
-from langchain_community.retrievers import BM25Retriever
-from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import AzureChatOpenAI
 from pydantic import BaseModel, Field
 from pprint import pprint
-from nltk import word_tokenize
-from nltk.stem import WordNetLemmatizer
-from nltk.corpus import stopwords
-import string
 
-from typing_extensions import Literal
+from agent.question_rewriter import question_rewriter
+from agent.bm25_retriever import bm25_retriever as retriever
+from agent.query_router import QueryRouting, query_router
+from agent.retrieval_grader import retrieval_grader, GradeDocuments
+from agent.hallucination_grader import hallucination_grader, GradeHallucinations
+from agent.answer_grader import answer_grader, GradeAnswer
+from agent.utils import llm
 
-load_dotenv(find_dotenv())
-
-stopword_corpus = set(stopwords.words("english"))
-lemmatizer = WordNetLemmatizer()
-
-
-def preprocess_fn(text: str):
-    text = text.lower()
-    text = "".join([c for c in text if c not in string.punctuation])
-    tokens = word_tokenize(text)
-    tokens = [t for t in tokens if t not in stopword_corpus]
-    tokens = [lemmatizer.lemmatize(t) for t in tokens]
-    return tokens
-
-
-docs_folder = Path(
-    r"D:\HKU\Inno Wing RA\UBC Exchange\code\output\Objectifying_China\docs"
-)
-loader = DirectoryLoader(
-    str(docs_folder.absolute()),
-    glob="**/*.md",
-    loader_cls=TextLoader,
-    loader_kwargs={"encoding": "utf-8"},
-)
-docs = loader.load()
-retriever = BM25Retriever.from_documents(docs, preprocess_func=preprocess_fn)
-
-
-### Query Router
-llm = AzureChatOpenAI(
-    api_version=os.environ["AZURE_API_VERSION"],
-    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
-    azure_deployment=os.environ["AZURE_OPENAI_DEPLOYEMENT"],
-)
-
-
-class QueryCategory(BaseModel):
-    category: Literal[
-        "general_knowledge",
-        "generative_task",
-        "domain_specific",
-        "multi_hop_reasoning",
-        "conversation",
-    ] = Field(description="user query category")
-
-    reason: str = Field(description="Briefly explain the criteria for judgment")
-
-
-structured_llm_grader = llm.with_structured_output(QueryCategory)
-
-system = """
-### ROLE
-You are a query classifier for a RAG system. Determine whether the user's question requires external knowledge retrieval.
-
-### BACKGROUND
-External knowledge are respect to artifacts in traditional chinese and chinese history culture
-
-### Classification criteria:
--**general_knowledge**: The problem belongs to general common sense, scientific knowledge, history, mathematical calculations, etc., and the large model can directly answer based on pre trained knowledge.
--**generative_task**: Tasks are generative tasks such as creation, writing, translation, polishing, programming, etc., which do not require additional knowledge.
--**domain_Specific**: The question involves internal database information, proprietary data, latest documents, project details, etc., and must be answered through retrieval.
--**Multi_hop_reasoning**: requires the combination of multiple facts or data for inference, typically relying on external knowledge support.
--**conversation**: Refers to small talk, conversation continuation, and interaction without the need for retrieval.
-"""
-query_router_prompt = ChatPromptTemplate(
-    [("system", system), ("human", "User Query: {question}")]
-)
-
-query_router = query_router_prompt | structured_llm_grader
-
-
-### Retrieval Grader
-# Data model
-class GradeDocuments(BaseModel):
-    """Binary score for relevance check on retrieved documents."""
-
-    binary_score: str = Field(
-        description="Documents are relevant to the question, 'yes' or 'no'"
-    )
-
-
-# LLM with function call
-structured_llm_grader = llm.with_structured_output(GradeDocuments)
-
-# Prompt
-system = """You are a grader assessing whether a user query needs to retrieve information. \n 
-    It does not need to be a stringent test. The goal is to filter out erroneous retrievals. \n
-    If the document contains keyword(s) or semantic meaning related to the user question, grade it as relevant. \n
-    Give a binary score 'yes' or 'no' score to indicate whether the document is relevant to the question."""
-question_grader = ""
-
-system = """You are a grader assessing relevance of a retrieved document to a user question. \n 
-    It does not need to be a stringent test. The goal is to filter out erroneous retrievals. \n
-    If the document contains keyword(s) or semantic meaning related to the user question, grade it as relevant. \n
-    Give a binary score 'yes' or 'no' score to indicate whether the document is relevant to the question."""
-grade_prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", system),
-        ("human", "Retrieved document: \n\n {document} \n\n User question: {question}"),
-    ]
-)
-
-retrieval_grader = grade_prompt | structured_llm_grader
 
 ### Generate
 # Prompt
@@ -136,75 +27,8 @@ def format_docs(docs):
 rag_chain = prompt | llm | StrOutputParser()
 
 
-### Hallucination Grader
-# Data model
-class GradeHallucinations(BaseModel):
-    """Binary score for hallucination present in generation answer."""
-
-    binary_score: str = Field(
-        description="Answer is grounded in the facts, 'yes' or 'no'"
-    )
-
-
-# LLM with function call
-structured_llm_grader = llm.with_structured_output(GradeHallucinations)
-
-# Prompt
-system = """You are a grader assessing whether an LLM generation is grounded in / supported by a set of retrieved facts. \n 
-     Give a binary score 'yes' or 'no'. 'Yes' means that the answer is grounded in / supported by the set of facts."""
-hallucination_prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", system),
-        ("human", "Set of facts: \n\n {documents} \n\n LLM generation: {generation}"),
-    ]
-)
-
-hallucination_grader = hallucination_prompt | structured_llm_grader
-
-
-### Answer Grader
-# Data model
-class GradeAnswer(BaseModel):
-    """Binary score to assess answer addresses question."""
-
-    binary_score: str = Field(
-        description="Answer addresses the question, 'yes' or 'no'"
-    )
-
-
-# LLM with function call
-structured_llm_grader = llm.with_structured_output(GradeAnswer)
-
-# Prompt
-system = """You are a grader assessing whether an answer addresses / resolves a question \n 
-     Give a binary score 'yes' or 'no'. Yes' means that the answer resolves the question."""
-answer_prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", system),
-        ("human", "User question: \n\n {question} \n\n LLM generation: {generation}"),
-    ]
-)
-
-answer_grader = answer_prompt | structured_llm_grader
-
 ### Question Re-writer
-
-# Prompt
-system = """You a question re-writer that converts an input question to a better version that is optimized \n 
-     for vectorstore retrieval. Look at the input and try to reason about the underlying semantic intent / meaning."""
-re_write_prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", system),
-        (
-            "human",
-            "Here is the initial question: \n\n {question} \n Formulate an improved question.",
-        ),
-    ]
-)
-
-question_rewriter = re_write_prompt | llm | StrOutputParser()
-
-from typing import Annotated, List, Literal
+from typing import Annotated, List
 from typing_extensions import TypedDict
 from langgraph.graph.message import add_messages
 
@@ -292,8 +116,8 @@ def grade_documents(state):
     # Score each doc
     filtered_docs = []
     for d in documents:
-        score = retrieval_grader.invoke(
-            {"question": question, "document": d.page_content}
+        score = GradeDocuments.model_validate(
+            retrieval_grader.invoke({"question": question, "document": d.page_content})
         )
         grade = score.binary_score
         if grade == "yes":
@@ -339,13 +163,11 @@ def decide_to_retrieve(state):
         str: Binary decision for next node to call
     """
     question = state["question"]
-    category = query_router.invoke({"question": question})
-    if category.category in ["general_knowledge", "generative_task", "conversation"]:
-        return "no_need_rag"
-    elif category.category in ["domain_specific", "multi_hop_reasoning"]:
+    routing = QueryRouting.model_validate(query_router.invoke({"question": question}))
+    if routing.need_rag:
         return "need_rag"
     else:
-        return "need_rag"
+        return "no_need_rag"
 
 
 def decide_to_generate(state):
@@ -392,8 +214,8 @@ def grade_generation_v_documents_and_question(state):
     documents = state["documents"]
     generation = state["generation"]
 
-    score = hallucination_grader.invoke(
-        {"documents": documents, "generation": generation}
+    score = GradeHallucinations.model_validate(
+        hallucination_grader.invoke({"documents": documents, "generation": generation})
     )
     grade = score.binary_score
 
@@ -402,7 +224,9 @@ def grade_generation_v_documents_and_question(state):
         print("---DECISION: GENERATION IS GROUNDED IN DOCUMENTS---")
         # Check question-answering
         print("---GRADE GENERATION vs QUESTION---")
-        score = answer_grader.invoke({"question": question, "generation": generation})
+        score = GradeAnswer.model_validate(
+            answer_grader.invoke({"question": question, "generation": generation})
+        )
         grade = score.binary_score
         if grade == "yes":
             print("---DECISION: GENERATION ADDRESSES QUESTION---")
