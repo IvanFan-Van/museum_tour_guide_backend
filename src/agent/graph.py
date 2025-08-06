@@ -1,7 +1,6 @@
 from langchain import hub
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from pydantic import BaseModel, Field
 from pprint import pprint
 
 from agent.question_rewriter import question_rewriter
@@ -11,11 +10,12 @@ from agent.retrieval_grader import retrieval_grader, GradeDocuments
 from agent.hallucination_grader import hallucination_grader, GradeHallucinations
 from agent.answer_grader import answer_grader, GradeAnswer
 from agent.utils import llm
+from agent.prompts import GENERATOR_PROMPT
 
 
 ### Generate
 # Prompt
-prompt = hub.pull("rlm/rag-prompt")
+prompt = ChatPromptTemplate.from_template(GENERATOR_PROMPT)
 
 
 # Post-processing
@@ -83,10 +83,16 @@ def generate(state):
     print("---GENERATE---")
     question = state["question"]
     documents = state["documents"]
+    messages = state["messages"]
 
     # RAG generation
-    generation = rag_chain.invoke({"context": documents, "question": question})
-    return {"documents": documents, "question": question, "generation": generation}
+    generation = rag_chain.invoke(
+        {"documents": documents, "user_query": question, "chat_history": messages}
+    )
+    return {
+        "generation": generation,
+        "messages": [generation],
+    }
 
 
 def direct_generate(state):
