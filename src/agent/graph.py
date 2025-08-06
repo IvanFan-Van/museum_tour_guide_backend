@@ -1,8 +1,12 @@
-from langchain import hub
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import AnyMessage, AIMessage
+from langgraph.graph.message import add_messages
 from pprint import pprint
+from typing import Annotated, List
+from typing_extensions import TypedDict
+
 
 from agent.question_rewriter import question_rewriter
 from agent.pinecone_retriever import retriever
@@ -34,11 +38,6 @@ rag_chain = prompt | llm | StrOutputParser()
 
 
 ### Question Re-writer
-from typing import Annotated, List
-from typing_extensions import TypedDict
-from langgraph.graph.message import add_messages
-
-
 class GraphState(TypedDict):
     """
     Represents the state of our graph.
@@ -52,12 +51,10 @@ class GraphState(TypedDict):
     question: str
     generation: str
     documents: List[str]
-    messages: Annotated[list, add_messages]
+    messages: Annotated[list[AnyMessage], add_messages]
 
 
 ### Nodes
-
-
 def retrieve(state):
     """
     Retrieve documents
@@ -99,7 +96,7 @@ def generate(state):
     )
     return {
         "generation": generation,
-        "messages": [generation],
+        "messages": [AIMessage(content=generation)],
     }
 
 
@@ -124,7 +121,7 @@ def direct_generate(state):
 
     answer_chain = prompt | llm | StrOutputParser()
     answer = answer_chain.invoke({"question": question, "chat_history": chat_history})
-    return {"generation": answer, "messages": [answer]}
+    return {"generation": answer, "messages": [AIMessage(content=answer)]}
 
 
 def grade_documents(state):
