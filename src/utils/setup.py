@@ -1,9 +1,13 @@
 import os
+import re
+from hashlib import sha256
+
 from langchain_openai import AzureOpenAIEmbeddings
 from pinecone import Pinecone, ServerlessSpec
 from dotenv import load_dotenv, find_dotenv
 from pinecone_text.sparse import BM25Encoder
 from langchain_community.retrievers import PineconeHybridSearchRetriever
+
 
 load_dotenv(find_dotenv())
 
@@ -48,10 +52,8 @@ loader = DirectoryLoader(
 )
 docs = loader.load()
 
+
 # assign id to docs
-from hashlib import sha256
-
-
 def hash_content(content: str):
     hash_obj = sha256()
     hash_obj.update(content.encode("utf-8"))
@@ -59,7 +61,16 @@ def hash_content(content: str):
 
 
 doc_ids = [hash_content(doc.page_content) for doc in docs]
-metadatas = [{"doc_id": id} for id in doc_ids]
+image_links = []
+for doc in docs:
+    matches = re.findall(r"!\[\]\([a-zA-Z:/\-\.0-9]+\)", doc.page_content)
+    image_links.append(matches)
+
+
+metadatas = [
+    {"doc_id": id, "image_links": imgs} for id, imgs in zip(doc_ids, image_links)
+]
+
 retriever.add_texts(
     texts=[d.page_content for d in docs], ids=doc_ids, metadatas=metadatas
 )
