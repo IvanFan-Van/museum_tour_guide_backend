@@ -1,6 +1,6 @@
-from pydantic import BaseModel, Field
-from typing_extensions import Literal
 from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, Field
+
 from agent.prompts import QUERY_ROUTER_PROMPT
 from agent.utils import llm
 

@@ -1,22 +1,22 @@
-from langchain_core.documents import Document
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.messages import AnyMessage, AIMessage
-from langgraph.graph.message import add_messages
 from pprint import pprint
 from typing import Annotated, List
+
+from langchain_core.documents import Document
+from langchain_core.messages import AIMessage, AnyMessage
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
-
-from agent.question_rewriter import question_rewriter
+from agent.answer_grader import GradeAnswer, answer_grader
+from agent.hallucination_grader import GradeHallucinations, hallucination_grader
 from agent.pinecone_retriever import retriever
-from agent.query_router import QueryRouting, query_router
-from agent.retrieval_grader import retrieval_grader, GradeDocuments
-from agent.hallucination_grader import hallucination_grader, GradeHallucinations
-from agent.answer_grader import answer_grader, GradeAnswer
-from agent.utils import llm
 from agent.prompts import GENERATOR_PROMPT
-
+from agent.query_router import QueryRouting, query_router
+from agent.question_rewriter import question_rewriter
+from agent.retrieval_grader import GradeDocuments, retrieval_grader
+from agent.utils import llm
 
 ### Generate
 # Prompt
@@ -126,7 +126,7 @@ def direct_generate(state):
 
 def grade_documents(state):
     """
-    Determines whether the retrieved documents are relevant to the question.
+    Determine whether the retrieved documents are relevant to the question.
 
     Args:
         state (dict): The current graph state
@@ -144,7 +144,7 @@ def grade_documents(state):
 
     formatted_blocks = "\n\n---\n\n".join(
         [
-            f'Block {i+1}:\n\n"""\n{text}\n"""'
+            f'Block {i + 1}:\n\n"""\n{text}\n"""'
             for i, text in enumerate([d.page_content for d in documents])
         ]
     )
@@ -198,7 +198,7 @@ def transform_query(state):
 
 def decide_to_retrieve(state):
     """
-    Determines whether to generate an answer, or going through the RAG pipeline
+    Determine whether to generate an answer, or going through the RAG pipeline
 
     Args:
         state (dict): The current graph state
@@ -216,7 +216,7 @@ def decide_to_retrieve(state):
 
 def decide_to_generate(state):
     """
-    Determines whether to generate an answer, or re-generate a question.
+    Determine whether to generate an answer, or re-generate a question.
 
     Args:
         state (dict): The current graph state
@@ -244,7 +244,7 @@ def decide_to_generate(state):
 
 def grade_generation_v_documents_and_question(state):
     """
-    Determines whether the generation is grounded in the document and answers question.
+    Determine whether the generation is grounded in the document and answers question.
 
     Args:
         state (dict): The current graph state
@@ -282,8 +282,6 @@ def grade_generation_v_documents_and_question(state):
         pprint("---DECISION: GENERATION IS NOT GROUNDED IN DOCUMENTS, RE-TRY---")
         return "not supported"
 
-
-from langgraph.graph import END, StateGraph, START
 
 workflow = StateGraph(GraphState)
 

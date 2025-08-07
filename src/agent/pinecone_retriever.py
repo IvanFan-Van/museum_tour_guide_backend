@@ -1,9 +1,10 @@
 import os
+
+from dotenv import find_dotenv, load_dotenv
+from langchain_community.retrievers import PineconeHybridSearchRetriever
 from langchain_openai import AzureOpenAIEmbeddings
 from pinecone import Pinecone, ServerlessSpec
-from dotenv import load_dotenv, find_dotenv
 from pinecone_text.sparse import BM25Encoder
-from langchain_community.retrievers import PineconeHybridSearchRetriever
 
 load_dotenv(find_dotenv())
 

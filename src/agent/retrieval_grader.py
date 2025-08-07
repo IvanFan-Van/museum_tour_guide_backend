@@ -1,8 +1,9 @@
 # Data model
 from langchain_core.prompts import ChatPromptTemplate
-from pydantic import Field, BaseModel
-from agent.utils import llm
+from pydantic import BaseModel, Field
+
 from agent.prompts import RANKING_PROMPT
+from agent.utils import llm
 
 
 class GradeDocument(BaseModel):

@@ -39,12 +39,12 @@ packages = ["langgraph.templates.agent", "agent"]
 
 [tool.ruff]
 lint.select = [
-    "E",    # pycodestyle
-    "F",    # pyflakes
-    "I",    # isort
-    "D",    # pydocstyle
+    "E", # pycodestyle
+    "F", # pyflakes
+    "I", # isort
+    # "D",    # pydocstyle
     "D401", # First line should be in imperative mood
-    "T201",
+    # "T201",
     "UP",
 ]
 lint.ignore = [

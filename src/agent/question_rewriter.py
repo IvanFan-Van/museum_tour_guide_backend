@@ -1,6 +1,7 @@
-from langchain_core.prompts import ChatPromptTemplate
-from agent.utils import llm
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+
+from agent.utils import llm
 
 # Prompt
 system = """You a question re-writer that converts an input question to a better version that is optimized \n 

@@ -1,13 +1,14 @@
 import os
 import re
 from hashlib import sha256
+from pathlib import Path
 
+from dotenv import find_dotenv, load_dotenv
+from langchain_community.document_loaders import DirectoryLoader, TextLoader
+from langchain_community.retrievers import PineconeHybridSearchRetriever
 from langchain_openai import AzureOpenAIEmbeddings
 from pinecone import Pinecone, ServerlessSpec
-from dotenv import load_dotenv, find_dotenv
 from pinecone_text.sparse import BM25Encoder
-from langchain_community.retrievers import PineconeHybridSearchRetriever
-
 
 load_dotenv(find_dotenv())
 
@@ -38,8 +39,6 @@ retriever = PineconeHybridSearchRetriever(
     embeddings=embeddings, sparse_encoder=bm25_encoder, index=index, top_k=10
 )
 
-from langchain_community.document_loaders import DirectoryLoader, TextLoader
-from pathlib import Path
 
 docs_folder = Path(
     r"D:\HKU\Inno Wing RA\UBC Exchange\self_rag\output\Objectifying_China\docs"
