@@ -3,7 +3,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from agent.prompts import RANKING_PROMPT
-from agent.utils import llm
+from agent.utils import zero_temp_llm as llm
 
 
 class GradeDocument(BaseModel):

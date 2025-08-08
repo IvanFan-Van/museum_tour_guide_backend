@@ -2,7 +2,12 @@ from pprint import pprint
 from typing import Annotated, List
 
 from langchain_core.documents import Document
-from langchain_core.messages import AIMessage, AnyMessage
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    HumanMessage,
+    get_buffer_string,
+)
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import END, START, StateGraph
@@ -16,7 +21,7 @@ from agent.prompts import GENERATOR_PROMPT
 from agent.query_router import QueryRouting, query_router
 from agent.question_rewriter import question_rewriter
 from agent.retrieval_grader import GradeDocuments, retrieval_grader
-from agent.utils import llm
+from agent.utils import format_documents_as_string, llm
 
 ### Generate
 # Prompt
@@ -48,8 +53,6 @@ class GraphState(TypedDict):
         documents: list of documents
     """
 
-    question: str
-    generation: str
     documents: List[str]
     messages: Annotated[list[AnyMessage], add_messages]
 
@@ -66,11 +69,11 @@ def retrieve(state):
         state (dict): New key added to state, documents, that contains retrieved documents
     """
     print("---RETRIEVE---")
-    question = state["question"]
+    query = state["messages"][-1].content
 
     # Retrieval
-    documents = retriever.invoke(question)
-    return {"documents": documents, "question": question}
+    documents = retriever.invoke(query)
+    return {"documents": documents}
 
 
 def generate(state):
@@ -84,18 +87,21 @@ def generate(state):
         state (dict): New key added to state, generation, that contains LLM generation
     """
     print("---GENERATE---")
-    question = state["question"]
     documents = state["documents"]
     messages = state["messages"]
-
-    chat_history = "\n\n".join([m.content for m in messages])
+    question = messages[-1].content
+    chat_history = get_buffer_string(messages)
+    documents_string = format_documents_as_string(documents)
 
     # RAG generation
     generation = rag_chain.invoke(
-        {"documents": documents, "user_query": question, "chat_history": chat_history}
+        {
+            "documents": documents_string,
+            "user_query": question,
+            "chat_history": chat_history,
+        }
     )
     return {
-        "generation": generation,
         "messages": [AIMessage(content=generation)],
     }
 
@@ -104,8 +110,8 @@ def direct_generate(state):
     """
     Generate answer without documents
     """
-    question = state["question"]
     messages = state["messages"]
+    query = messages[-1].content
 
     chat_history = "\n\n".join([m.content for m in messages])
     prompt = ChatPromptTemplate.from_messages(
@@ -114,14 +120,14 @@ def direct_generate(state):
             (
                 "human",
                 "Here is the chat history: {chat_history}\n\n"
-                "Here is the user query: {question}",
+                "Here is the user query: {query}",
             ),
         ]
     )
 
     answer_chain = prompt | llm | StrOutputParser()
-    answer = answer_chain.invoke({"question": question, "chat_history": chat_history})
-    return {"generation": answer, "messages": [AIMessage(content=answer)]}
+    answer = answer_chain.invoke({"query": query, "chat_history": chat_history})
+    return {"messages": [AIMessage(content=answer)]}
 
 
 def grade_documents(state):
@@ -136,7 +142,7 @@ def grade_documents(state):
     """
 
     print("---CHECK DOCUMENT RELEVANCE TO QUESTION---")
-    question = state["question"]
+    question = state["messages"][-1].content
     documents: list[Document] = state["documents"]
 
     # Score each doc
@@ -165,12 +171,12 @@ def grade_documents(state):
     )
 
     for idx, score in enumerate(scores.block_rankings):
-        if score.relevance_score >= 0.6:
+        if score.relevance_score >= 0.7:
             documents[idx].metadata["relevance_score"] = score.relevance_score
             documents[idx].metadata["reasoning"] = score.reasoning
             filtered_docs.append(documents[idx])
 
-    return {"documents": filtered_docs, "question": question}
+    return {"documents": filtered_docs}
 
 
 def transform_query(state):
@@ -185,12 +191,15 @@ def transform_query(state):
     """
 
     print("---TRANSFORM QUERY---")
-    question = state["question"]
-    documents = state["documents"]
+    original_question = state["messages"][-1].content
 
     # Re-write question
-    better_question = question_rewriter.invoke({"question": question})
-    return {"documents": documents, "question": better_question}
+    better_question = question_rewriter.invoke({"question": original_question})
+    rewritten_message = HumanMessage(
+        content=better_question,
+        metadata={"is_rewritten": True, "original_question": original_question},
+    )
+    return {"messages": [rewritten_message]}
 
 
 ### Edges
@@ -206,7 +215,7 @@ def decide_to_retrieve(state):
     Returns:
         str: Binary decision for next node to call
     """
-    question = state["question"]
+    question = state["messages"][-1].content
     routing = QueryRouting.model_validate(query_router.invoke({"question": question}))
     if routing.need_rag:
         return "need_rag"
@@ -226,10 +235,9 @@ def decide_to_generate(state):
     """
 
     print("---ASSESS GRADED DOCUMENTS---")
-    state["question"]
     filtered_documents = state["documents"]
 
-    if not filtered_documents:
+    if len(filtered_documents) < 3:
         # All documents have been filtered check_relevance
         # We will re-generate a new query
         print(
@@ -254,9 +262,9 @@ def grade_generation_v_documents_and_question(state):
     """
 
     print("---CHECK HALLUCINATIONS---")
-    question = state["question"]
+    question = state["messages"][-2].content  # skip AI generated message
     documents = state["documents"]
-    generation = state["generation"]
+    generation = state["messages"][-1].content
 
     score = GradeHallucinations.model_validate(
         hallucination_grader.invoke({"documents": documents, "generation": generation})
