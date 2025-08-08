@@ -29,7 +29,7 @@ def test_format_documents_as_string():
     ]
 
     docs_string = format_documents_as_string(docs)
-    expected_string = "[doc1 | 0.9]\nhello world\n\n[doc2 | 0.8]\nfoo bar\n\n[doc3 | 0.5]\nlorem ipsum"
+    expected_string = "[doc_id: doc1 | score: 0.9]\nhello world\n\n[doc_id: doc2 | score: 0.8]\nfoo bar\n\n[doc_id: doc3 | score: 0.5]\nlorem ipsum"
     assert docs_string == expected_string
 
 
