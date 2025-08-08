@@ -37,3 +37,24 @@ def test_format_documents_as_string_empty():
     docs = []
     docs_string = format_documents_as_string(docs)
     assert docs_string == ""  # Should return an empty string for no documents
+
+
+def test_format_documents_as_string_no_relevance_score():
+    docs = [
+        Document(
+            page_content="hello world",
+            metadata={
+                "doc_id": "doc1",
+            },
+        ),
+        Document(
+            page_content="foo bar",
+            metadata={
+                "doc_id": "doc2",
+            },
+        ),
+    ]
+
+    docs_string = format_documents_as_string(docs)
+    expected_string = "[doc_id: doc1]\nhello world\n\n[doc_id: doc2]\nfoo bar"
+    assert docs_string == expected_string

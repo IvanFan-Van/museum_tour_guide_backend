@@ -27,9 +27,13 @@ def format_documents_as_string(docs: list[Document]) -> str:
 
     doc_string_list = []
     for doc in docs:
+        metadata_list = []
         doc_id = "doc_id: " + doc.metadata.get("doc_id", "")
-        score = "score: " + str(doc.metadata.get("relevance_score", ""))
-        metadata_header = "[" + " | ".join([doc_id, score]) + "]"
+        metadata_list.append(doc_id)
+        if "relevance_score" in doc.metadata:
+            score = "score: " + str(doc.metadata.get("relevance_score", ""))
+            metadata_list.append(score)
+        metadata_header = "[" + " | ".join(metadata_list) + "]"
         doc_string = metadata_header + "\n" + doc.page_content
         doc_string_list.append(doc_string)
 

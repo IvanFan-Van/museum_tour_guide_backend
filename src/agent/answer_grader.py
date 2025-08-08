@@ -22,7 +22,10 @@ system = """You are a grader assessing whether an answer addresses / resolves a 
 answer_prompt = ChatPromptTemplate.from_messages(
     [
         ("system", system),
-        ("human", "User question: \n\n {question} \n\n LLM generation: {generation}"),
+        (
+            "human",
+            "**User question**: \n\n {question} \n\n **LLM generation**\n\n: {generation}",
+        ),
     ]
 )
 

@@ -30,10 +30,10 @@ prompt = ChatPromptTemplate.from_messages(
         ("system", GENERATOR_PROMPT),
         (
             "human",
-            "**Now, respond to this:**\n"
-            "**User Query:** '{user_query}'\n"
-            "**Relevant Context:** {documents}\n"
-            "**Chat History: {chat_history}**\n",
+            "## Chat History\n{chat_history}\n\n"
+            "## Retrieved Context\n{documents}\n\n"
+            "## Current User Query\n{user_query}\n\n"
+            "## Response\n",
         ),
     ]
 )
@@ -113,14 +113,14 @@ def direct_generate(state):
     messages = state["messages"]
     query = messages[-1].content
 
-    chat_history = "\n\n".join([m.content for m in messages])
+    chat_history = get_buffer_string(messages)
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", GENERATOR_PROMPT),
             (
                 "human",
-                "Here is the chat history: {chat_history}\n\n"
-                "Here is the user query: {query}",
+                "Here is the chat history:\n\n {chat_history} \n\n"
+                "Here is the user query:\n\n {query}",
             ),
         ]
     )
@@ -147,14 +147,7 @@ def grade_documents(state):
 
     # Score each doc
     filtered_docs = []
-
-    formatted_blocks = "\n\n---\n\n".join(
-        [
-            f'Block {i + 1}:\n\n"""\n{text}\n"""'
-            for i, text in enumerate([d.page_content for d in documents])
-        ]
-    )
-
+    formatted_blocks = format_documents_as_string(documents)
     user_prompt = (
         f'Here is the query: "{question}"\n\n'
         "Here are the retrieved text blocks:\n"
@@ -265,9 +258,11 @@ def grade_generation_v_documents_and_question(state):
     question = state["messages"][-2].content  # skip AI generated message
     documents = state["documents"]
     generation = state["messages"][-1].content
-
+    documents_string = format_documents_as_string(documents)
     score = GradeHallucinations.model_validate(
-        hallucination_grader.invoke({"documents": documents, "generation": generation})
+        hallucination_grader.invoke(
+            {"documents": documents_string, "generation": generation}
+        )
     )
     grade = score.binary_score
 
