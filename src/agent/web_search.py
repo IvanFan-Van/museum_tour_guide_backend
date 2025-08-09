@@ -29,7 +29,7 @@ def get_keywords_with_retry(query: str) -> list[str]:
     return keywords
 
 
-def wiki_search(query: str):
+def wiki_search(query: str) -> dict:
     """
     Search for summary of wikipedia page and return Documents
 
@@ -74,4 +74,4 @@ def wiki_search(query: str):
             if doc:
                 documents.append(doc)
 
-    return documents
+    return {"documents": documents, "keywords": keywords}

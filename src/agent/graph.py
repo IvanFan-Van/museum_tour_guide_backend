@@ -5,7 +5,6 @@ from langchain_core.documents import Document
 from langchain_core.messages import (
     AIMessage,
     AnyMessage,
-    HumanMessage,
     get_buffer_string,
 )
 from langchain_core.output_parsers import StrOutputParser
@@ -49,17 +48,30 @@ class GraphState(TypedDict):
     Represents the state of our graph.
 
     Attributes:
-        question: question
-        generation: LLM generation
-        documents: list of documents
+        messages: The history of messages.
+        user_query: The original user query.
+        current_query: The current query being processed (can be rewritten).
+        db_documents: Documents retrieved from the database.
+        web_documents: Documents retrieved from the web search.
+        final_documents: The final list of documents used for generation.
+        generation: The LLM's generated response.
+        retries_left: The number of retries left for query transformation.
+        keywords: Keywords extracted for web search.
     """
 
-    documents: List[str]
     messages: Annotated[list[AnyMessage], add_messages]
+    user_query: str
+    current_query: str
+    db_documents: List[Document]
+    web_documents: List[Document]
+    final_documents: List[Document]
+    generation: str
+    retries_left: int
+    keywords: List[str]
 
 
 ### Nodes
-def retrieve(state):
+def retrieve(state: GraphState):
     """
     Retrieve documents
 
@@ -70,14 +82,14 @@ def retrieve(state):
         state (dict): New key added to state, documents, that contains retrieved documents
     """
     print("---RETRIEVE---")
-    query = state["messages"][-1].content
+    query = state["current_query"]
 
     # Retrieval
     documents = retriever.invoke(query)
-    return {"documents": documents}
+    return {"db_documents": documents}
 
 
-def generate(state):
+def generate(state: GraphState):
     """
     Generate answer
 
@@ -88,9 +100,9 @@ def generate(state):
         state (dict): New key added to state, generation, that contains LLM generation
     """
     print("---GENERATE---")
-    documents = state["documents"]
+    documents = state["final_documents"]
     messages = state["messages"]
-    question = messages[-1].content
+    question = state["current_query"]
     chat_history = get_buffer_string(messages)
     documents_string = format_documents_as_string(documents)
 
@@ -104,15 +116,16 @@ def generate(state):
     )
     return {
         "messages": [AIMessage(content=generation)],
+        "generation": generation,
     }
 
 
-def direct_generate(state):
+def direct_generate(state: GraphState):
     """
     Generate answer without documents
     """
     messages = state["messages"]
-    query = messages[-1].content
+    query = state["current_query"]
 
     chat_history = get_buffer_string(messages)
     prompt = ChatPromptTemplate.from_messages(
@@ -128,10 +141,10 @@ def direct_generate(state):
 
     answer_chain = prompt | llm | StrOutputParser()
     answer = answer_chain.invoke({"query": query, "chat_history": chat_history})
-    return {"messages": [AIMessage(content=answer)]}
+    return {"messages": [AIMessage(content=answer)], "generation": answer}
 
 
-def grade_documents(state):
+def grade_documents(state: GraphState):
     """
     Determine whether the retrieved documents are relevant to the question.
 
@@ -143,8 +156,8 @@ def grade_documents(state):
     """
 
     print("---CHECK DOCUMENT RELEVANCE TO QUESTION---")
-    question = state["messages"][-1].content
-    documents: list[Document] = state["documents"]
+    question = state["current_query"]
+    documents: list[Document] = state["db_documents"]
 
     filtered_docs = [d for d in documents if "relevance_score" in d.metadata]
     # Score each doc
@@ -174,10 +187,10 @@ def grade_documents(state):
             check_docs[idx].metadata["reasoning"] = score.reasoning
             filtered_docs.append(check_docs[idx])
 
-    return {"documents": filtered_docs}
+    return {"final_documents": filtered_docs}
 
 
-def transform_query(state):
+def transform_query(state: GraphState):
     """
     Transform the query to produce a better question.
 
@@ -189,31 +202,47 @@ def transform_query(state):
     """
 
     print("---TRANSFORM QUERY---")
-    original_question = state["messages"][-1].content
+    original_question = state["user_query"]
 
     # Re-write question
     better_question = question_rewriter.invoke({"question": original_question})
-    rewritten_message = HumanMessage(
-        content=better_question,
-        metadata={"is_rewritten": True, "original_question": original_question},
-    )
-    return {"messages": [rewritten_message]}
+    return {"current_query": better_question, "retries_left": state["retries_left"] - 1}
 
 
 def web_search(state: GraphState):
-    query = state["messages"][-1].content
+    query = state["current_query"]
     if not isinstance(query, str):
         raise ValueError("message content must be a string")
-    db_docs = state.get("documents", [])
-    web_docs = wiki_search(query)
-    return {"documents": db_docs + web_docs}
+    db_docs = state.get("db_documents", [])
+    web_results = wiki_search(query)
+    web_docs = web_results["documents"]
+    keywords = web_results["keywords"]
+    return {
+        "web_documents": web_docs,
+        "final_documents": db_docs + web_docs,
+        "keywords": keywords,
+    }
+
+
+def init(state: GraphState):
+    """Initialize the state for a new run"""
+    print("---INITIALIZING RUN---")
+    question = state["messages"][-1].content
+    assert isinstance(question, str)
+    # This node returns a dictionary to update the state
+    return {
+        "user_query": question,
+        "current_query": question,
+        "retries_left": 2,
+        "db_documents": [],
+        "web_documents": [],
+        "final_documents": [],
+        "keywords": [],
+    }
 
 
 ### Edges
-retries = 1
-
-
-def decide_to_retrieve(state):
+def decide_to_retrieve(state: GraphState):
     """
     Determine whether to generate an answer, or going through the RAG pipeline
 
@@ -223,7 +252,8 @@ def decide_to_retrieve(state):
     Returns:
         str: Binary decision for next node to call
     """
-    question = state["messages"][-1].content
+    question = state["current_query"]
+
     routing = QueryRouting.model_validate(query_router.invoke({"question": question}))
     if routing.need_rag:
         return "need_rag"
@@ -231,7 +261,7 @@ def decide_to_retrieve(state):
         return "no_need_rag"
 
 
-def decide_to_generate(state):
+def decide_to_generate(state: GraphState):
     """
     Determine whether to generate an answer, or re-generate a question.
 
@@ -243,15 +273,14 @@ def decide_to_generate(state):
     """
 
     print("---ASSESS GRADED DOCUMENTS---")
-    filtered_documents = state["documents"]
-    global retries
-    if len(filtered_documents) < 3 and retries > 0:
+    filtered_documents = state["final_documents"]
+    retries_left = state["retries_left"]
+    if len(filtered_documents) < 3 and retries_left > 0:
         print(
             "---DECISION: ALL DOCUMENTS ARE NOT RELEVANT TO QUESTION, TRANSFORM QUERY---"
         )
-        retries -= 1
         return "transform_query"
-    elif len(filtered_documents) < 3 and retries == 0:
+    elif len(filtered_documents) < 3 and retries_left == 0:
         return "web_search"
     else:
         # We have relevant documents, so generate answer
@@ -259,7 +288,7 @@ def decide_to_generate(state):
         return "generate"
 
 
-def grade_generation_v_documents_and_question(state):
+def grade_generation_v_documents_and_question(state: GraphState):
     """
     Determine whether the generation is grounded in the document and answers question.
 
@@ -271,9 +300,9 @@ def grade_generation_v_documents_and_question(state):
     """
 
     print("---CHECK HALLUCINATIONS---")
-    question = state["messages"][-2].content  # skip AI generated message
-    documents = state["documents"]
-    generation = state["messages"][-1].content
+    question = state["current_query"]
+    documents = state["final_documents"]
+    generation = state["generation"]
     documents_string = format_documents_as_string(documents)
     score = GradeHallucinations.model_validate(
         hallucination_grader.invoke(
@@ -305,6 +334,7 @@ def grade_generation_v_documents_and_question(state):
 workflow = StateGraph(GraphState)
 
 # Define the nodes
+workflow.add_node("init", init)  # init
 workflow.add_node("retrieve", retrieve)  # retrieve
 workflow.add_node("grade_documents", grade_documents)  # grade documents
 workflow.add_node("generate", generate)  # generate
@@ -313,8 +343,9 @@ workflow.add_node("transform_query", transform_query)  # transform_query
 workflow.add_node("web_search", web_search)
 
 # Build graph
+workflow.add_edge(START, "init")
 workflow.add_conditional_edges(
-    START,
+    "init",
     decide_to_retrieve,
     {"need_rag": "retrieve", "no_need_rag": "direct_generate"},
 )
