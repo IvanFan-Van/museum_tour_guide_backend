@@ -22,6 +22,7 @@ from agent.query_router import QueryRouting, query_router
 from agent.question_rewriter import question_rewriter
 from agent.retrieval_grader import GradeDocuments, retrieval_grader
 from agent.utils import format_documents_as_string, llm
+from agent.web_search import wiki_search
 
 ### Generate
 # Prompt
@@ -145,29 +146,33 @@ def grade_documents(state):
     question = state["messages"][-1].content
     documents: list[Document] = state["documents"]
 
+    filtered_docs = [d for d in documents if "relevance_score" in d.metadata]
     # Score each doc
-    filtered_docs = []
-    formatted_blocks = format_documents_as_string(documents)
+    check_docs = [d for d in documents if "relevance_score" not in d.metadata]
+    formatted_blocks = format_documents_as_string(check_docs)
     user_prompt = (
         f'Here is the query: "{question}"\n\n'
         "Here are the retrieved text blocks:\n"
         f"{formatted_blocks}\n\n"
-        f"You should provide exactly {len(documents)} rankings, in order."
+        f"You should provide exactly {len(check_docs)} rankings, in order."
     )
 
-    scores = GradeDocuments.model_validate(
-        retrieval_grader.invoke(
-            {
-                "user_prompt": user_prompt,
-            }
+    def get_scores(user_prompt: str):
+        scores = GradeDocuments.model_validate(
+            retrieval_grader.invoke(
+                {
+                    "user_prompt": user_prompt,
+                }
+            )
         )
-    )
+        return scores
 
+    scores = get_scores(user_prompt)
     for idx, score in enumerate(scores.block_rankings):
         if score.relevance_score >= 0.7:
-            documents[idx].metadata["relevance_score"] = score.relevance_score
-            documents[idx].metadata["reasoning"] = score.reasoning
-            filtered_docs.append(documents[idx])
+            check_docs[idx].metadata["relevance_score"] = score.relevance_score
+            check_docs[idx].metadata["reasoning"] = score.reasoning
+            filtered_docs.append(check_docs[idx])
 
     return {"documents": filtered_docs}
 
@@ -195,7 +200,17 @@ def transform_query(state):
     return {"messages": [rewritten_message]}
 
 
+def web_search(state: GraphState):
+    query = state["messages"][-1].content
+    if not isinstance(query, str):
+        raise ValueError("message content must be a string")
+    db_docs = state.get("documents", [])
+    web_docs = wiki_search(query)
+    return {"documents": db_docs + web_docs}
+
+
 ### Edges
+retries = 1
 
 
 def decide_to_retrieve(state):
@@ -229,14 +244,15 @@ def decide_to_generate(state):
 
     print("---ASSESS GRADED DOCUMENTS---")
     filtered_documents = state["documents"]
-
-    if len(filtered_documents) < 3:
-        # All documents have been filtered check_relevance
-        # We will re-generate a new query
+    global retries
+    if len(filtered_documents) < 3 and retries > 0:
         print(
             "---DECISION: ALL DOCUMENTS ARE NOT RELEVANT TO QUESTION, TRANSFORM QUERY---"
         )
+        retries -= 1
         return "transform_query"
+    elif len(filtered_documents) < 3 and retries == 0:
+        return "web_search"
     else:
         # We have relevant documents, so generate answer
         print("---DECISION: GENERATE---")
@@ -294,6 +310,7 @@ workflow.add_node("grade_documents", grade_documents)  # grade documents
 workflow.add_node("generate", generate)  # generate
 workflow.add_node("direct_generate", direct_generate)  # direct_generate
 workflow.add_node("transform_query", transform_query)  # transform_query
+workflow.add_node("web_search", web_search)
 
 # Build graph
 workflow.add_conditional_edges(
@@ -308,10 +325,12 @@ workflow.add_conditional_edges(
     decide_to_generate,
     {
         "transform_query": "transform_query",
+        "web_search": "web_search",
         "generate": "generate",
     },
 )
 workflow.add_edge("transform_query", "retrieve")
+workflow.add_edge("web_search", "generate")
 workflow.add_conditional_edges(
     "generate",
     grade_generation_v_documents_and_question,

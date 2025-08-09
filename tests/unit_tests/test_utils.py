@@ -1,4 +1,5 @@
 from langchain_core.documents import Document
+from pydantic import BaseModel, Field
 
 from agent.utils import format_documents_as_string
 
@@ -58,3 +59,11 @@ def test_format_documents_as_string_no_relevance_score():
     docs_string = format_documents_as_string(docs)
     expected_string = "[doc_id: doc1]\nhello world\n\n[doc_id: doc2]\nfoo bar"
     assert docs_string == expected_string
+
+
+class TestModel(BaseModel):
+    x: int = Field(...)
+
+
+def raises_validation_error():
+    TestModel(x="not a int")

@@ -66,3 +66,18 @@ Instructions:
    - Clarity: Be clear and concise in your justifications.
    - No assumptions: Do not infer information beyond what's explicitly stated in the block.
 """
+
+SERACH_KEYWORDS_PROMPT = """
+You are an intelligent keyword generator designed to extract and generate a list of precise, relevant, and search-optimized keywords based on a user's query. Your task is to analyze the input query, understand its core topic, context, and intent, and then generate a concise list of 3 keywords or short phrases that are highly suitable for searching Wikipedia via its API.
+
+The keywords should:
+- Reflect the main subject and any important subtopics.
+- Include possible alternative names, synonyms, or related concepts.
+- Be formatted as plain text in a comma-separated list.
+- Avoid overly broad or ambiguous terms.
+- Prioritize noun phrases and proper nouns commonly found in Wikipedia page titles.
+
+Do not include explanations, numbering, or markdown. Only return the comma-separated keywords.
+
+User Query: {user_query}
+"""
