@@ -1,5 +1,5 @@
 from pprint import pprint
-from typing import Annotated, List
+from typing import Annotated, List, Literal
 
 from langchain_core.documents import Document
 from langchain_core.messages import (
@@ -68,6 +68,7 @@ class GraphState(TypedDict):
     generation: str
     retries_left: int
     keywords: List[str]
+    grade_documents: Literal["db_documents", "web_documents"]
 
 
 ### Nodes
@@ -89,6 +90,23 @@ def retrieve(state: GraphState):
     return {"db_documents": documents}
 
 
+def fuse_documents(state: GraphState):
+    """
+    Fuse Documents from grade documents
+    """
+    db_documents = state.get("db_documents", [])
+    web_documents = state.get("web_documents", [])
+    documents = db_documents + web_documents
+
+    filtered_docs = []
+    for doc in documents:
+        assert "relevance_score" in doc.metadata
+        if doc.metadata["relevance_score"] >= 0.7:
+            filtered_docs.append(doc)
+
+    return {"final_documents": filtered_docs}
+
+
 def generate(state: GraphState):
     """
     Generate answer
@@ -100,7 +118,9 @@ def generate(state: GraphState):
         state (dict): New key added to state, generation, that contains LLM generation
     """
     print("---GENERATE---")
-    documents = state["final_documents"]
+    db_documents = state["db_documents"]
+    web_documents = state["web_documents"]
+    documents = db_documents + web_documents
     messages = state["messages"]
     question = state["current_query"]
     chat_history = get_buffer_string(messages)
@@ -146,7 +166,7 @@ def direct_generate(state: GraphState):
 
 def grade_documents(state: GraphState):
     """
-    Determine whether the retrieved documents are relevant to the question.
+    Score documents
 
     Args:
         state (dict): The current graph state
@@ -157,17 +177,17 @@ def grade_documents(state: GraphState):
 
     print("---CHECK DOCUMENT RELEVANCE TO QUESTION---")
     question = state["current_query"]
-    documents: list[Document] = state["db_documents"]
+    grade_documents = state["grade_documents"]
+    assert grade_documents in state
+    documents: list[Document] = state[grade_documents]
 
-    filtered_docs = [d for d in documents if "relevance_score" in d.metadata]
     # Score each doc
-    check_docs = [d for d in documents if "relevance_score" not in d.metadata]
-    formatted_blocks = format_documents_as_string(check_docs)
+    formatted_blocks = format_documents_as_string(documents)
     user_prompt = (
         f'Here is the query: "{question}"\n\n'
         "Here are the retrieved text blocks:\n"
         f"{formatted_blocks}\n\n"
-        f"You should provide exactly {len(check_docs)} rankings, in order."
+        f"You should provide exactly {len(documents)} rankings, in order."
     )
 
     def get_scores(user_prompt: str):
@@ -182,12 +202,10 @@ def grade_documents(state: GraphState):
 
     scores = get_scores(user_prompt)
     for idx, score in enumerate(scores.block_rankings):
-        if score.relevance_score >= 0.7:
-            check_docs[idx].metadata["relevance_score"] = score.relevance_score
-            check_docs[idx].metadata["reasoning"] = score.reasoning
-            filtered_docs.append(check_docs[idx])
+        documents[idx].metadata["relevance_score"] = score.relevance_score
+        documents[idx].metadata["reasoning"] = score.reasoning
 
-    return {"final_documents": filtered_docs}
+    return {grade_documents: documents}
 
 
 def transform_query(state: GraphState):
@@ -213,14 +231,13 @@ def web_search(state: GraphState):
     query = state["current_query"]
     if not isinstance(query, str):
         raise ValueError("message content must be a string")
-    db_docs = state.get("db_documents", [])
     web_results = wiki_search(query)
     web_docs = web_results["documents"]
     keywords = web_results["keywords"]
     return {
         "web_documents": web_docs,
-        "final_documents": db_docs + web_docs,
         "keywords": keywords,
+        "grade_documents": "web_documents",
     }
 
 
@@ -238,6 +255,7 @@ def init(state: GraphState):
         "web_documents": [],
         "final_documents": [],
         "keywords": [],
+        "grade_documents": "db_documents",
     }
 
 
@@ -280,7 +298,11 @@ def decide_to_generate(state: GraphState):
             "---DECISION: ALL DOCUMENTS ARE NOT RELEVANT TO QUESTION, TRANSFORM QUERY---"
         )
         return "transform_query"
-    elif len(filtered_documents) < 3 and retries_left == 0:
+    elif (
+        len(filtered_documents) < 3  # very limited context
+        and retries_left == 0  # no retries
+        and state.get("grade_documents") != "web_documents"  # no web search before
+    ):
         return "web_search"
     else:
         # We have relevant documents, so generate answer
@@ -337,6 +359,7 @@ workflow = StateGraph(GraphState)
 workflow.add_node("init", init)  # init
 workflow.add_node("retrieve", retrieve)  # retrieve
 workflow.add_node("grade_documents", grade_documents)  # grade documents
+workflow.add_node("fuse_documents", fuse_documents)  # fuse documents
 workflow.add_node("generate", generate)  # generate
 workflow.add_node("direct_generate", direct_generate)  # direct_generate
 workflow.add_node("transform_query", transform_query)  # transform_query
@@ -351,8 +374,9 @@ workflow.add_conditional_edges(
 )
 workflow.add_edge("direct_generate", END)
 workflow.add_edge("retrieve", "grade_documents")
+workflow.add_edge("grade_documents", "fuse_documents")
 workflow.add_conditional_edges(
-    "grade_documents",
+    "fuse_documents",
     decide_to_generate,
     {
         "transform_query": "transform_query",
@@ -361,7 +385,8 @@ workflow.add_conditional_edges(
     },
 )
 workflow.add_edge("transform_query", "retrieve")
-workflow.add_edge("web_search", "generate")
+workflow.add_edge("web_search", "grade_documents")
+# workflow.add_edge("fuse_documents", "generate")
 workflow.add_conditional_edges(
     "generate",
     grade_generation_v_documents_and_question,
