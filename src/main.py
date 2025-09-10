@@ -34,7 +34,7 @@ class QueryRequest(TypedDict):
 @app.post("/invoke")
 def invoke(req: QueryRequest):
     messages = [HumanMessage(content=req["query"])]
-    response = graph.invoke({"messages": messages})
+    response = graph.invoke({"messages": messages})  # type: ignore
     # print(response)
     return response.get("generation", None)
 
@@ -66,16 +66,10 @@ def tts(req: QueryRequest):
         energy_rate=1.0,  # scale up/down the energy
     )
 
-    print(1)
     waveforms = hifi_gan.decode_batch(mel_output)
-    print(2)
-
     wav_buffer = io.BytesIO()
     sf.write(
         wav_buffer, waveforms.squeeze().cpu().numpy(), samplerate=22050, format="WAV"
     )
-    print(3)
-
     wav_buffer.seek(0)
-
     return StreamingResponse(wav_buffer, media_type="audio/wav")
