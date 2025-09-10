@@ -1,11 +1,20 @@
+from typing import TypedDict
+
 from fastapi import FastAPI
+from langchain_core.messages import HumanMessage
 
 from src.agent.graph import graph
 
 app = FastAPI()
 
 
-@app.get("/invoke")
-def invoke():
-    print(graph)
-    return {"message": "Graph invoked"}
+class QueryRequest(TypedDict):
+    query: str
+
+
+@app.post("/invoke")
+def invoke(req: QueryRequest):
+    messages = [HumanMessage(content=req["query"])]
+    response = graph.invoke({"messages": messages})
+    # print(response)
+    return response.get("generation", None)

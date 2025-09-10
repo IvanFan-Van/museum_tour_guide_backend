@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 from langchain_community.retrievers import PineconeHybridSearchRetriever
@@ -21,7 +22,14 @@ if index_name not in pc.list_indexes().names():
 
 index = pc.Index(index_name)
 
-bm25_encoder = BM25Encoder.default()
+config_path = os.path.join(os.getcwd(), "src", "bm25_encoder.json")
+if Path(config_path).exists():
+    print("Loading BM25 encoder from", config_path)
+    bm25_encoder = BM25Encoder()
+    bm25_encoder.load(str(Path(config_path).absolute()))
+else:
+    print("Using default BM25 encoder")
+    bm25_encoder = BM25Encoder.default()
 
 embeddings = AzureOpenAIEmbeddings(
     azure_deployment=os.environ["AZURE_OPENAI_EMBEDDING_DEPLOYMENT"],
