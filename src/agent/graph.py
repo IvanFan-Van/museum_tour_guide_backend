@@ -1,4 +1,3 @@
-from pprint import pprint
 from typing import Annotated, List, Literal
 
 from langchain_core.documents import Document
@@ -13,8 +12,6 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
-from agent.answer_grader import GradeAnswer, answer_grader
-from agent.hallucination_grader import GradeHallucinations, hallucination_grader
 from agent.pinecone_retriever import retriever
 from agent.prompts import GENERATOR_PROMPT
 from agent.query_router import QueryRouting, query_router
@@ -310,49 +307,6 @@ def decide_to_generate(state: GraphState):
         return "generate"
 
 
-def grade_generation_v_documents_and_question(state: GraphState):
-    """
-    Determine whether the generation is grounded in the document and answers question.
-
-    Args:
-        state (dict): The current graph state
-
-    Returns:
-        str: Decision for next node to call
-    """
-
-    print("---CHECK HALLUCINATIONS---")
-    question = state["current_query"]
-    documents = state["final_documents"]
-    generation = state["generation"]
-    documents_string = format_documents_as_string(documents)
-    score = GradeHallucinations.model_validate(
-        hallucination_grader.invoke(
-            {"documents": documents_string, "generation": generation}
-        )
-    )
-    grade = score.binary_score
-
-    # Check hallucination
-    if grade == "yes":
-        print("---DECISION: GENERATION IS GROUNDED IN DOCUMENTS---")
-        # Check question-answering
-        print("---GRADE GENERATION vs QUESTION---")
-        score = GradeAnswer.model_validate(
-            answer_grader.invoke({"question": question, "generation": generation})
-        )
-        grade = score.binary_score
-        if grade == "yes":
-            print("---DECISION: GENERATION ADDRESSES QUESTION---")
-            return "useful"
-        else:
-            print("---DECISION: GENERATION DOES NOT ADDRESS QUESTION---")
-            return "not useful"
-    else:
-        pprint("---DECISION: GENERATION IS NOT GROUNDED IN DOCUMENTS, RE-TRY---")
-        return "not supported"
-
-
 workflow = StateGraph(GraphState)
 
 # Define the nodes
@@ -386,16 +340,7 @@ workflow.add_conditional_edges(
 )
 workflow.add_edge("transform_query", "retrieve")
 workflow.add_edge("web_search", "grade_documents")
-# workflow.add_edge("fuse_documents", "generate")
-workflow.add_conditional_edges(
-    "generate",
-    grade_generation_v_documents_and_question,
-    {
-        "not supported": "generate",
-        "useful": END,
-        "not useful": "transform_query",
-    },
-)
+workflow.add_edge("generate", END)
 
 # Compile
 graph = workflow.compile()
