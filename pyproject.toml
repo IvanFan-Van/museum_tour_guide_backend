@@ -1,0 +1,30 @@
+[project]
+name = "server"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "chromadb>=1.1.1",
+    "colorlog>=6.10.1",
+    "fastapi>=0.118.0",
+    "jieba>=0.42.1",
+    "langchain-community>=0.3.31",
+    "langchain-ollama>=0.3.10",
+    "langchain-openai>=0.3.35",
+    "langgraph>=0.6.9",
+    "langgraph-sdk>=0.2.9",
+    "nltk>=3.9.2",
+    "pip>=25.2",
+    "pydantic>=2.12.0",
+    "rank-bm25>=0.2.2",
+    "spacy>=3.8.7",
+    "uvicorn>=0.37.0",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.0.0",
+    "langgraph-cli[inmem]>=0.4.2",
+    "notebook>=7.4.7",
+]
