@@ -8,5 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
-data/
 chroma_db/
+.langgraph_api/
+static/
+dev_log/

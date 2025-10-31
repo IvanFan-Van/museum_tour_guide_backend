@@ -1,16 +1,16 @@
 import asyncio
-from cgitb import text
 import os
 import traceback
-from typing import Literal, TypedDict
 import warnings
 import json
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from src.graph import graph
 from src.utils import get_tts, get_logger
 from src.accumulator import AudioAccumulator
+from api_exception import register_exception_handlers
 
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
@@ -24,6 +24,10 @@ app = FastAPI(
     version="1.0.0",
 )
 
+register_exception_handlers(app, log_traceback=False, log=True)
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -31,25 +35,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-# 全局异常处理器
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """全局异常处理器 - 捕获所有未处理的异常"""
-    logger.error(f"Global exception occurred: {type(exc).__name__}: {str(exc)}")
-    logger.error(f"Request URL: {request.url}")
-    logger.error(f"Traceback: {traceback.format_exc()}")
-
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": "Internal server error",
-            "message": "An unexpected error occurred. Please try again later.",
-            "type": type(exc).__name__,
-            "detail": str(exc),  # 添加详细信息用于调试
-        },
-    )
 
 
 @app.get("/api/v1/health")

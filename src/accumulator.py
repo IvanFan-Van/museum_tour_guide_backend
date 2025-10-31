@@ -46,7 +46,11 @@ class AudioAccumulator:
             return
 
         cleaned_segment = self._clean_text(segment)
-        logger.info(f"开始处理积累的文本块: {cleaned_segment}")
+        # expected logging: Process Text Chunk: This is the true fact that... (total 74 words)
+        logger.info(
+            f"Process Text Chunk: {cleaned_segment[:50]}... (total {len(cleaned_segment)} words)"
+        )
+
         try:
             # 使用 to_thread 在单独的线程中运行同步的TTS函数，避免阻塞
             base64_audio = await asyncio.to_thread(self.tts_function, cleaned_segment)

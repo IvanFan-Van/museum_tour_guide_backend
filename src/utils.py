@@ -145,15 +145,15 @@ def format_docs(docs: list[Document]) -> str:
 def get_logger():
     global logger
     logger = colorlog.getLogger("museum_tour_guide")
+
     if not logger.hasHandlers():
         handler = colorlog.StreamHandler()
         handler.setFormatter(
             colorlog.ColoredFormatter(
-                "%(log_color)s%(levelname)-8s%(reset)s | %(message)s"
+                "%(log_color)s%(levelname)s%(reset)s:\t| %(message)s"
             )
         )
 
-        logger = colorlog.getLogger()
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
         logger.propagate = False

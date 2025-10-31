@@ -130,14 +130,24 @@ async def _rerank_documents(query: str, docs: list[Document]) -> list[Document]:
 async def retrieve(state: State):
     """检索节点 - 根据用户消息检索相关文档"""
     # 如果 state 中有 doc_id，直接根据 ID 检索
-    if state.get("doc_id"):
+    if state.get("doc_id", None) and state["doc_id"] != "null":
         docs = await _retrieve_by_id(state["doc_id"])
         return {"docs": docs}
 
     # 否则根据消息内容检索
     query = state["messages"][-1].content
     docs = await _retrieve_documents(query)
-    logger.info(f"Retrieved {len(docs)} documents for query: {query}")
+    # TODO change "name" to "source"
+    logger.info(
+        f"Retrieved {len(docs)} documents for query: {query}: \n"
+        + "\n".join(
+            [
+                f"\t\t{idx + 1}. {doc.metadata.get('name', 'unknown')}"
+                for idx, doc in enumerate(docs)
+            ]
+        )
+    )
+
     return {"docs": docs}
 
 
@@ -158,6 +168,19 @@ async def rerank(state: State):
     if not docs:
         return {"docs": []}
     ranked_docs = await _rerank_documents(query, docs)
+
+    # expected logging: Reranked documents for query - "What is the history of...":
+    #      - doc1 (score: 0.95)
+    #      - doc2 (score: 0.89)
+    logger.info(
+        f'Reranked documents for query - "{query}": \n'
+        + "\n".join(
+            [
+                f"\t\t{idx + 1}. {doc.metadata.get('name', 'unknown')}\t(score: {doc.metadata.get('rerank_score', 'N/A'):.4f})"
+                for idx, doc in enumerate(ranked_docs)
+            ]
+        )
+    )
     return {"docs": ranked_docs}
 
 
