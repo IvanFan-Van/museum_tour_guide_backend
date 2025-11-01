@@ -1,6 +1,6 @@
 import asyncio
 import re
-from typing import AsyncIterator, List, Optional
+from typing import AsyncIterator, Callable, List, Optional
 from asyncio import Queue
 from src.utils import get_logger
 
@@ -14,22 +14,19 @@ class AudioAccumulator:
     """
 
     def __init__(
-        self,
-        tts_function,
-        delimiter_threshold: int = 3,
-        delimiters: List[str] | None = None,
+        self, tts_function: Callable[[str], bytes | None], num_sentence_cached: int = 2
     ):
         self.tts_function = tts_function
-        self.delimiter_threshold = delimiter_threshold
-        self.delimiters = delimiters or ["\n\n", "\n", "。", "！", "？", "!"]
+        self.num_sentence_cached = num_sentence_cached
+        self.pattern = re.compile(r"(.*?)[。！？!:\.\?][\n\s]", flags=re.MULTILINE)
         self._buffer = ""
-        self._audio_queue: Queue[Optional[str]] = Queue()
+        self._audio_queue: Queue[Optional[bytes]] = Queue()
         self._finished = False
 
-    def __aiter__(self) -> AsyncIterator[str]:
+    def __aiter__(self) -> AsyncIterator[bytes]:
         return self
 
-    async def __anext__(self) -> str:
+    async def __anext__(self) -> bytes:
         """从队列中获取下一段音频，如果队列为空且已结束，则停止迭代。"""
         item = await self._audio_queue.get()
         if item is None:  # None 作为结束信号
@@ -53,9 +50,9 @@ class AudioAccumulator:
 
         try:
             # 使用 to_thread 在单独的线程中运行同步的TTS函数，避免阻塞
-            base64_audio = await asyncio.to_thread(self.tts_function, cleaned_segment)
-            if base64_audio:
-                await self._audio_queue.put(base64_audio)
+            audio_chunk = await asyncio.to_thread(self.tts_function, cleaned_segment)
+            if audio_chunk:
+                await self._audio_queue.put(audio_chunk)
         except Exception as e:
             logger.error(f"Error during TTS conversion: {e}")
 
@@ -64,25 +61,27 @@ class AudioAccumulator:
         self._buffer += chunk
 
         # 寻找最靠后的分隔符作为分割点
-        delimiter_count = sum(self._buffer.count(d) for d in self.delimiters)
-
+        # delimiter_count = sum(self._buffer.count(d) for d in self.delimiters)
+        sentences = self.pattern.findall(self._buffer)
+        num_sentence = len(sentences)
         # 如果超过字符阈值，则处理
-        if delimiter_count >= self.delimiter_threshold:
+        if num_sentence >= self.num_sentence_cached:
             split_pos = -1
-            for d in self.delimiters:
-                pos = self._buffer.rfind(d)
-                if pos != -1:
-                    split_pos = max(pos + len(d), split_pos)
+            pos = self._buffer.rfind(sentences[-1])
+            if pos == -1:
+                return
 
-            if split_pos != -1:
-                segment_to_process = self._buffer[:split_pos]
-                self._buffer = self._buffer[split_pos:]
-                await self._process_segment(segment_to_process)
+            split_pos = pos + len(sentences[-1]) + 2
+            segment_to_process = self._buffer[:split_pos]
+            self._buffer = self._buffer[split_pos:]
+            await self._process_segment(segment_to_process)
 
     async def flush(self):
         """处理缓冲区中剩余的所有文本。"""
         if self._buffer:
-            await self._process_segment(self._buffer)
+            remaining_buffer = self._buffer
             self._buffer = ""
+            await self._process_segment(remaining_buffer)
+
         # 发送结束信号
         await self._audio_queue.put(None)

@@ -61,7 +61,7 @@ def get_tts():
             }
         )
 
-        def convert_text_to_speech_base64(text: str) -> str | None:
+        def convert_text_to_speech_base64(text: str) -> bytes | None:
             endpoint = os.getenv("AZURE_OPENAI_TTS_ENDPOINT")
             if not endpoint:
                 raise ValueError(
@@ -79,7 +79,7 @@ def get_tts():
 
                 response.raise_for_status()
 
-                return base64.b64encode(response.content).decode("utf-8")
+                return response.content
             except requests.exceptions.RequestException as e:
                 logger.error(f"Text-to-speech conversion failed. {e}")
                 return None

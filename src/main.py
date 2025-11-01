@@ -5,7 +5,7 @@ from typing import TypedDict
 import warnings
 import json
 from langchain_core.runnables.schema import StreamEvent
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -49,36 +49,10 @@ async def error():
     raise ValueError("This is a test error endpoint.")
 
 
-@app.get("/api/v1/invoke")
-async def invoke(query: str, doc_id: str | None = None):
-    """
-    与 LangGraph RAG 应用进行交互，通过 Server-Sent Events (SSE) 流式返回结果。
-
-    SSE 事件流包含以下几种事件类型:
-
-    - **event: connected**
-      - 描述: 连接成功后发送的第一条消息。
-      - 数据结构: `{"status": "success"}`
-
-    - **event: message**
-      - 描述: RAG 应用生成的内容块，会持续发送直到内容生成完毕。
-      - 数据结构: `{"type": "text" 或 "audio", "chunk": "..."}` 或 `{"type": "audio", "chunk": "data:audio/wav;base64,..."}`
-        - `chunk` (str): 模型生成的文本片段或是音频片段。
-
-    - **event: done**
-      - 描述: 表示所有内容已成功生成并发送完毕。
-      - 数据结构: `{"finish": true}`
-
-    - **event: error**
-      - 描述: 在处理过程中发生错误时发送。
-      - 数据结构: `{"error": "...", "detail": "..."}`
-        - `error` (str): 错误类型或简短描述。
-        - `detail` (str): 详细的错误信息。
-    """
-    graph_input = {
-        "messages": [{"role": "user", "content": query}],
-        "doc_id": doc_id,
-    }
+@app.websocket("/api/v1/invoke")
+async def invoke(websocket: WebSocket):
+    await websocket.accept()
+    acc = None
 
     # 获取节点ID的辅助函数
     def get_node_id(node_name: str, event):
@@ -87,76 +61,89 @@ async def invoke(query: str, doc_id: str | None = None):
         else:
             return None
 
-    # 结果队列, 存储任务完成后的结果
-    queue = asyncio.Queue()
+    try:
+        data = await websocket.receive_json()
+        query = data.get("query", None)
+        doc_id = data.get("doc_id", None)
 
-    # 生成SSE响应的异步生成器
-    async def generate():
-        generator_id = None
+        if not query:
+            raise ValueError("Query parameter is required.")
+
+        graph_input = {
+            "messages": [{"role": "user", "content": query}],
+            "doc_id": doc_id,
+        }
+
+        # 结果队列, 存储任务完成后的结果
+        queue = asyncio.Queue()
+
         tts = get_tts()
-        acc = AudioAccumulator(tts_function=tts, delimiter_threshold=3)
-        try:
-            # 发送 connected 事件
-            yield f"event: connected\ndata: {json.dumps({'status': 'success'})}\n\n"
+        acc = AudioAccumulator(tts_function=tts, num_sentence_cached=1)
 
-            # 文本生成函数
-            async def text_generation_task():
-                event: StreamEvent
-                async for event in graph.astream_events(graph_input, version="v2"):
-                    nonlocal generator_id
-                    if generator_id is None:
-                        generator_id = get_node_id("generator", event)
+        await websocket.send_json({"event": "connected", "data": {"status": "success"}})
 
-                    if (
-                        event["event"] == "on_chat_model_stream"
-                        and generator_id in event["parent_ids"]
-                    ):
-                        if "data" not in event or "chunk" not in event["data"]:
-                            logger.error(f"No data in event: {event}")
-                            continue
+        # 文本生成函数
+        async def text_generation_task():
+            event: StreamEvent
+            generator_id = None
+            async for event in graph.astream_events(graph_input, version="v2"):
+                if generator_id is None:
+                    generator_id = get_node_id("generator", event)
 
-                        chunk = event["data"]["chunk"].content
-                        if chunk:
-                            data = {
-                                "type": "text",
-                                "chunk": chunk,
-                            }
-                            # 将结果添加到结果队列以及 accumulator 中
-                            await queue.put(
-                                f"event: message\ndata: {json.dumps(data)}\n\n"
-                            )
-                            await acc.add_chunk(chunk)
-                await acc.flush()
+                if (
+                    event["event"] == "on_chat_model_stream"
+                    and generator_id in event["parent_ids"]
+                ):
+                    if "data" not in event or "chunk" not in event["data"]:
+                        logger.error(f"No data in event: {event}")
+                        continue
 
-            # 音频生成任务
-            async def audio_generation_task():
-                async for audio_chunk in acc:
-                    data = {
-                        "type": "audio",
-                        "chunk": f"data:audio/wav;base64,{audio_chunk}",
-                    }
-                    await queue.put(f"event: message\ndata: {json.dumps(data)}\n\n")
-
-                await queue.put(None)  # 使用 None 标记任务的结束
-
-            text_task = asyncio.create_task(text_generation_task())
-            audio_task = asyncio.create_task(audio_generation_task())
-
-            asyncio.gather(text_task, audio_task)
-
-            while True:
-                item = await queue.get()
-                if item is None:
-                    break
-                yield item
-
-            # 发送 done 事件
-            yield f"event: done\ndata: {json.dumps({'finish': True})}\n\n"
-        except Exception as e:
-            logger.error(f"Error during SSE generation: {e}\n{traceback.format_exc()}")
-            error_payload = {"error": type(e).__name__, "detail": str(e)}
-            # 发送 error 事件
-            yield f"event: error\ndata: {json.dumps(error_payload)}\n\n"
+                    chunk = event["data"]["chunk"].content
+                    if chunk:
+                        data = {
+                            "event": "message",
+                            "data": {"chunk": chunk},
+                        }
+                        # 将结果添加到结果队列以及 accumulator 中
+                        await queue.put(data)
+                        await acc.add_chunk(chunk)
             await acc.flush()
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+        # 音频生成任务
+        async def audio_generation_task():
+            async for audio_chunk in acc:
+                await queue.put(audio_chunk)
+
+            await queue.put(None)  # 使用 None 标记任务的结束
+
+        text_task = asyncio.create_task(text_generation_task())
+        audio_task = asyncio.create_task(audio_generation_task())
+
+        asyncio.gather(text_task, audio_task)
+
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+
+            if isinstance(item, dict):
+                await websocket.send_json(item)
+            elif isinstance(item, bytes):
+                await websocket.send_bytes(item)
+
+        await websocket.send_json({"event": "done", "data": {"status": "success"}})
+
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected by client.")
+        if acc:
+            await acc.flush()
+    except Exception as e:
+        logger.error(
+            f"Error during WebSocket communication: {e}\n{traceback.format_exc()}"
+        )
+        error_payload = {"error": type(e).__name__, "detail": str(e)}
+        await websocket.send_json({"event": "error", "data": error_payload})
+        if acc:
+            await acc.flush()
+    finally:
+        await websocket.close()
