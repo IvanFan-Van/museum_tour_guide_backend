@@ -1,8 +1,10 @@
 import asyncio
 import os
 import traceback
+from typing import TypedDict
 import warnings
 import json
+from langchain_core.runnables.schema import StreamEvent
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -99,6 +101,7 @@ async def invoke(query: str, doc_id: str | None = None):
 
             # 文本生成函数
             async def text_generation_task():
+                event: StreamEvent
                 async for event in graph.astream_events(graph_input, version="v2"):
                     nonlocal generator_id
                     if generator_id is None:
@@ -108,6 +111,10 @@ async def invoke(query: str, doc_id: str | None = None):
                         event["event"] == "on_chat_model_stream"
                         and generator_id in event["parent_ids"]
                     ):
+                        if "data" not in event or "chunk" not in event["data"]:
+                            logger.error(f"No data in event: {event}")
+                            continue
+
                         chunk = event["data"]["chunk"].content
                         if chunk:
                             data = {

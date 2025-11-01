@@ -42,6 +42,7 @@ def get_gemma3_270m():
 
 
 def get_tts():
+    logger = get_logger()
     global tts
     if tts is None:
         import requests

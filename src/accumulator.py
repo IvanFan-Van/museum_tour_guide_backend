@@ -17,7 +17,7 @@ class AudioAccumulator:
         self,
         tts_function,
         delimiter_threshold: int = 3,
-        delimiters: List[str] = None,
+        delimiters: List[str] | None = None,
     ):
         self.tts_function = tts_function
         self.delimiter_threshold = delimiter_threshold

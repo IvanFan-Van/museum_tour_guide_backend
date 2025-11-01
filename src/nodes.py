@@ -12,8 +12,8 @@ async def router(state: State):
     if state.get("doc_id"):
         logger.info(f"Doc ID provided: {state['doc_id']}, routing to RAG")
         return {"need_rag": True}
-    response = await query_router.ainvoke(state["messages"][-1].content)
-    return {"need_rag": response.need_rag}
+    response = await query_router.ainvoke({"query": state["messages"][-1].content})
+    return {"need_rag": response.need_rag}  # type: ignore
 
 
 # 定义聊天机器人节点

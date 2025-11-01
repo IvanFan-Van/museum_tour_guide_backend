@@ -4,6 +4,8 @@ import asyncio
 from langgraph.graph import START, StateGraph, END
 from langchain_core.documents import Document
 from chromadb import PersistentClient
+from numpy import isin
+from regex import R
 from src.models import State
 from src.utils import get_logger
 import requests
@@ -24,7 +26,7 @@ COLLECTION_NAME = "museum_knowledge_base"
 async def _init_chroma():
     """初始化 ChromaDB 客户端和集合"""
     global _client, _collection
-    if _client is None:
+    if _client is None or _collection is None:
 
         def _init_sync():
             try:
@@ -50,6 +52,10 @@ async def _retrieve_documents(query: str) -> list[Document]:
             include=["documents", "metadatas"],
         )
 
+        if results["documents"] is None or results["metadatas"] is None:
+            logger.warning(f"No documents or metadata found for query: {query}")
+            return []
+
         return [
             Document(
                 id=id,
@@ -74,8 +80,8 @@ async def _retrieve_by_id(doc_id: str) -> list[Document]:
                 include=["documents", "metadatas"],
             )
 
-            if not results["ids"] or len(results["ids"]) == 0:
-                logger.info(f"Document with ID {doc_id} not found.")
+            if results["documents"] is None or results["metadatas"] is None:
+                logger.warning(f"No documents or metadata found for doc_id: {doc_id}")
                 return []
 
             return [
@@ -131,11 +137,14 @@ async def retrieve(state: State):
     """检索节点 - 根据用户消息检索相关文档"""
     # 如果 state 中有 doc_id，直接根据 ID 检索
     if state.get("doc_id", None) and state["doc_id"] != "null":
-        docs = await _retrieve_by_id(state["doc_id"])
+        docs = await _retrieve_by_id(state["doc_id"])  # type: ignore
         return {"docs": docs}
 
     # 否则根据消息内容检索
     query = state["messages"][-1].content
+    if not isinstance(query, str):
+        raise ValueError(f"The latest message content must be a string. {query}")
+
     docs = await _retrieve_documents(query)
     # TODO change "name" to "source"
     logger.info(
@@ -164,6 +173,10 @@ async def rerank(state: State):
         return {"docs": docs}
 
     query = state["messages"][-1].content
+
+    if not isinstance(query, str):
+        raise ValueError(f"The latest message content must be a string. {query}")
+
     docs = state.get("docs", [])
     if not docs:
         return {"docs": []}
