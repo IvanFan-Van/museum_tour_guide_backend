@@ -10,5 +10,5 @@ wheels/
 .venv
 chroma_db/
 .langgraph_api/
-static/
 dev_log/
+.env
