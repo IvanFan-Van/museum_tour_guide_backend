@@ -6,6 +6,23 @@ from chromadb import PersistentClient
 
 
 def main():
+    """
+    Usage:
+        python backend/setup.py [--reset]
+
+    This script sets up the ChromaDB vector database with documents from the
+    'data/Objectifying_China/docs' directory.
+
+    By default, it will update the existing 'museum_knowledge_base' collection
+    with the latest documents. This is an 'upsert' operation, meaning it will
+    add new documents and update existing ones based on their IDs.
+
+    Arguments:
+        --reset     If this flag is provided, the script will first delete the
+                    'museum_knowledge_base' collection if it exists, and then
+                    recreate it before adding the documents. This is useful
+                    for a clean, fresh start.
+    """
     parser = argparse.ArgumentParser(
         description="Setup ChromaDB with museum knowledge base"
     )
