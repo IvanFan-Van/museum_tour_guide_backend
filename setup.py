@@ -79,6 +79,8 @@ def main():
         metadatas=metadatas,
     )
 
+    print(f"After setup, the collection has the following stats: {collection.count()} documents.")
+
 
 if __name__ == "__main__":
     main()

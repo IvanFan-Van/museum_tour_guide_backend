@@ -1,28 +1,13 @@
 {
-    "documents": "# Organised by 主辦  \n\nUNIVERSITY MUSEUM AND ART GALLERY,\n\nTHE UNIVERSITY OF HONG KONG\n\n90 Bonham Road, Hong Kong\n\n香港大學美術博物館\n\n香港般咸道九十號  \n\n978-988-19025-1-1  \n\nSupported by 支持  \n\n![](objectifying_china/59_2.jpeg)\n\n![](objectifying_china/55_1.jpeg)\n\n![](objectifying_china/55_1.jpeg)\n\n![](objectifying_china/55_1.jpeg)\n\n![](objectifying_china/55_1.jpeg)\n\n![](objectifying_china/55_1.jpeg)\n\n![](objectifying_china/59_2.jpeg)\n\n![](objectifying_china/55_1.jpeg)\n\n![](objectifying_china/59_2.jpeg)\n\n![](objectifying_china/55_1.jpeg)\n\n![](objectifying_china/55_1.jpeg)\n\n![](objectifying_china/55_1.jpeg)\n\n![](objectifying_china/55_1.jpeg)\n\n![](objectifying_china/55_1.jpeg)\n\n![](objectifying_china/55_1.jpeg)\n\n![](objectifying_china/55_1.jpeg)\n\n![](objectifying_china/55_1.jpeg)\n\n![](objectifying_china/5_1.jpeg)",
-    "ids": "954b5b2e4f72634fc15eed818ad78266",
+    "documents": "# Organised by 主辦  \n\nUNIVERSITY MUSEUM AND ART GALLERY,\n\nTHE UNIVERSITY OF HONG KONG\n\n90 Bonham Road, Hong Kong\n\n香港大學美術博物館\n\n香港般咸道九十號  \n\n978-988-19025-1-1  \n\nSupported by 支持  \n\n![](objectifying_china/55_1.jpeg)\n\n![](objectifying_china/59_2.jpeg)\n\n![](objectifying_china/5_1.jpeg)",
+    "ids": "548a260f379fb42d044a706f08f7e5d8",
     "metadata": {
-        "name": "Organised by 主辦  ",
+        "name": "Organised by 主辦",
         "description": "UNIVERSITY MUSEUM AND ART GALLERY,\n\nTHE UNIVERSITY OF HONG KONG\n\n90 Bonham Road, Hong Kong\n\n香港大學美術博物館\n\n香港般咸道九十號  \n\n978-988-19025-1-1  \n\nSupported by 支持",
-        "source": "Objectifying_China",
+        "source": "objectifying_china",
         "images": [
-            "59_2.jpeg",
-            "55_1.jpeg",
-            "55_1.jpeg",
-            "55_1.jpeg",
-            "55_1.jpeg",
             "55_1.jpeg",
             "59_2.jpeg",
-            "55_1.jpeg",
-            "59_2.jpeg",
-            "55_1.jpeg",
-            "55_1.jpeg",
-            "55_1.jpeg",
-            "55_1.jpeg",
-            "55_1.jpeg",
-            "55_1.jpeg",
-            "55_1.jpeg",
-            "55_1.jpeg",
             "5_1.jpeg"
         ]
     }
