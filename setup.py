@@ -49,12 +49,13 @@ def main():
         print("Using existing ChromaDB database...")
         collection = client.get_or_create_collection(name=collection_name)
 
-    docs_path = Path("data/Objectifying_China/docs")
+    data_dir = Path("data")
 
     documents = []
     ids = []
     metadatas = []
-    for filepath in docs_path.glob("*.json"):
+    for filepath in data_dir.rglob("*.json"):
+        print(f"Processing file: {filepath}")
         with open(filepath.absolute(), "r", encoding="utf-8") as f:
             try:
                 data = json.load(f)
@@ -62,8 +63,8 @@ def main():
                 print(f"Error loading {filepath}")
                 continue
 
-            documents.append(data["documents"])
-            ids.append(data["ids"])
+            documents.append(data["document"])
+            ids.append(data["id"])
             data["metadata"].pop("description", None)
             data["metadata"].pop("images", None)
             metadatas.append(data["metadata"])
@@ -79,7 +80,9 @@ def main():
         metadatas=metadatas,
     )
 
-    print(f"After setup, the collection has the following stats: {collection.count()} documents.")
+    print(
+        f"After setup, the collection has the following stats: {collection.count()} documents."
+    )
 
 
 if __name__ == "__main__":
