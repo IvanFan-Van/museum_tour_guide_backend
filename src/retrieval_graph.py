@@ -4,8 +4,6 @@ import asyncio
 from langgraph.graph import START, StateGraph, END
 from langchain_core.documents import Document
 from chromadb import PersistentClient
-from numpy import isin
-from regex import R
 from src.models import State
 from src.utils import get_logger
 import requests

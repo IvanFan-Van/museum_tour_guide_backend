@@ -3,7 +3,14 @@ import json
 from pathlib import Path
 
 from chromadb import PersistentClient
+from pydantic import BaseModel
+import pydantic
+from colorama import init, Fore, Style
 
+class JSONData(BaseModel):
+    id: str
+    document: str
+    metadata: dict
 
 def main():
     """
@@ -49,24 +56,35 @@ def main():
         print("Using existing ChromaDB database...")
         collection = client.get_or_create_collection(name=collection_name)
 
-    docs_path = Path("data/Objectifying_China/docs")
+    data_dir = Path("data")
 
     documents = []
     ids = []
     metadatas = []
-    for filepath in docs_path.glob("*.json"):
+    existing_ids = set(collection.get()["ids"])
+    for filepath in data_dir.rglob("*.json"):
+        # print(f"Processing file: {filepath}")
         with open(filepath.absolute(), "r", encoding="utf-8") as f:
             try:
                 data = json.load(f)
+                JSONData.model_validate(data)
             except json.JSONDecodeError:
                 print(f"Error loading {filepath}")
                 continue
-
-            documents.append(data["documents"])
-            ids.append(data["ids"])
+            except pydantic.ValidationError as e:
+                print(f"{Fore.RED}Validation error in {filepath}: {e}{Fore.RESET}")
+                continue
+            
+            if data["id"] in existing_ids:
+                print(f"{Fore.RED}ERROR - Duplicate ID found: {data['id']} in file {filepath}, skipping...{Fore.RESET}")
+                continue
+            documents.append(data["document"])
+            ids.append(data["id"])
             data["metadata"].pop("description", None)
             data["metadata"].pop("images", None)
             metadatas.append(data["metadata"])
+            existing_ids.add(data["id"])
+
 
     if not ids:
         print("No documents found to add to the database.")
@@ -77,6 +95,10 @@ def main():
         ids=ids,
         documents=documents,
         metadatas=metadatas,
+    )
+
+    print(
+        f"After setup, the collection has the following stats: {collection.count()} documents."
     )
 
 
