@@ -3,7 +3,14 @@ import json
 from pathlib import Path
 
 from chromadb import PersistentClient
+from pydantic import BaseModel
+import pydantic
+from colorama import init, Fore, Style
 
+class JSONData(BaseModel):
+    id: str
+    document: str
+    metadata: dict
 
 def main():
     """
@@ -54,20 +61,30 @@ def main():
     documents = []
     ids = []
     metadatas = []
+    existing_ids = set(collection.get()["ids"])
     for filepath in data_dir.rglob("*.json"):
-        print(f"Processing file: {filepath}")
+        # print(f"Processing file: {filepath}")
         with open(filepath.absolute(), "r", encoding="utf-8") as f:
             try:
                 data = json.load(f)
+                JSONData.model_validate(data)
             except json.JSONDecodeError:
                 print(f"Error loading {filepath}")
                 continue
-
+            except pydantic.ValidationError as e:
+                print(f"{Fore.RED}Validation error in {filepath}: {e}{Fore.RESET}")
+                continue
+            
+            if data["id"] in existing_ids:
+                print(f"{Fore.RED}ERROR - Duplicate ID found: {data['id']} in file {filepath}, skipping...{Fore.RESET}")
+                continue
             documents.append(data["document"])
             ids.append(data["id"])
             data["metadata"].pop("description", None)
             data["metadata"].pop("images", None)
             metadatas.append(data["metadata"])
+            existing_ids.add(data["id"])
+
 
     if not ids:
         print("No documents found to add to the database.")
