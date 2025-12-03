@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "apiexception>=0.2.1",
     "chromadb>=1.1.1",
+    "colorama>=0.4.6",
     "colorlog>=6.10.1",
     "fastapi>=0.118.0",
     "jieba>=0.42.1",
