@@ -1,16 +1,22 @@
 import argparse
 import json
+import os
 from pathlib import Path
 
 from chromadb import PersistentClient
 from pydantic import BaseModel
 import pydantic
 from colorama import init, Fore, Style
+from dotenv import load_dotenv, find_dotenv
+
+load_dotenv(find_dotenv())
+
 
 class JSONData(BaseModel):
     id: str
     document: str
     metadata: dict
+
 
 def main():
     """
@@ -40,8 +46,8 @@ def main():
     )
     args = parser.parse_args()
 
-    client = PersistentClient(path="chroma_db")
-    collection_name = "museum_knowledge_base"
+    client = PersistentClient(path=os.getenv("CHROMADB_DIR", "chroma_db"))
+    collection_name = os.getenv("COLLECTION_NAME", "museum_knowledge_base")
 
     if args.reset:
         print("Resetting ChromaDB database...")
@@ -74,17 +80,22 @@ def main():
             except pydantic.ValidationError as e:
                 print(f"{Fore.RED}Validation error in {filepath}: {e}{Fore.RESET}")
                 continue
-            
+
             if data["id"] in existing_ids:
-                print(f"{Fore.RED}ERROR - Duplicate ID found: {data['id']} in file {filepath}, skipping...{Fore.RESET}")
+                print(
+                    f"{Fore.RED}ERROR - Duplicate ID found: {data['id']} in file {filepath}, skipping...{Fore.RESET}"
+                )
                 continue
             documents.append(data["document"])
             ids.append(data["id"])
-            data["metadata"].pop("description", None)
-            data["metadata"].pop("images", None)
+            # serialize images list to JSON string
+            if "images" in data["metadata"]:
+                assert isinstance(data["metadata"]["images"], list), (
+                    f"Images field must be a list in {filepath}"
+                )
+                data["metadata"]["images"] = json.dumps(data["metadata"]["images"])
             metadatas.append(data["metadata"])
             existing_ids.add(data["id"])
-
 
     if not ids:
         print("No documents found to add to the database.")

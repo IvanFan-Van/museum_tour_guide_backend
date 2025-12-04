@@ -1,3 +1,4 @@
+from email.mime import image
 import os
 import re
 from dotenv import load_dotenv, find_dotenv
@@ -138,8 +139,15 @@ def preprocess(text: str) -> list[str]:
 
 def format_docs(docs: list[Document]) -> str:
     formatted = ""
+    image_urls = []
+    for doc in docs:
+        metadata = doc.metadata
+        if "images" in metadata:
+            image_urls.extend(metadata["images"])
+    image_urls = list(set(image_urls))  # remove duplicates
+    image_urls = [f"![image]({url})" for url in image_urls]
     for idx, doc in enumerate(docs):
-        formatted += f"DOC{idx + 1}: {doc.page_content}\n\n"
+        formatted += f"DOC{idx + 1}: {doc.page_content}\n{'\n'.join(image_urls)}\n\n"
     return formatted
 
 

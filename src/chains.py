@@ -4,6 +4,7 @@ from src.utils import get_gpt4o
 from src.models import QueryRouting
 from src.prompts import QUERY_ROUTER_PROMPT, GENERATOR_PROMPT
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
 
 gpt4o = get_gpt4o()
 

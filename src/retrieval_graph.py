@@ -1,6 +1,8 @@
 """定义检索图子图 - 包含检索和重排序节点"""
 
 import asyncio
+import json
+from multiprocessing import Value
 from langgraph.graph import START, StateGraph, END
 from langchain_core.documents import Document
 from chromadb import PersistentClient
@@ -8,6 +10,9 @@ from src.models import State
 from src.utils import get_logger
 import requests
 import os
+from dotenv import load_dotenv, find_dotenv
+
+load_dotenv(find_dotenv())
 
 logger = get_logger()
 workflow = StateGraph(State)
@@ -17,8 +22,14 @@ _client = None
 _collection = None
 
 FINAL_DOCS_COUNT = 3  # 最终用于生成回答的文档数量
-CLIENT_PATH = "./chroma_db"
-COLLECTION_NAME = "museum_knowledge_base"
+try:
+    CLIENT_PATH = os.environ["CHROMADB_DIR"]
+except KeyError:
+    raise ValueError("CHROMA_DB_PATH environment variable is not set.")
+try:
+    COLLECTION_NAME = os.environ["COLLECTION_NAME"]
+except KeyError:
+    raise ValueError("COLLECTION_NAME environment variable is not set.")
 
 
 async def _init_chroma():
@@ -54,6 +65,18 @@ async def _retrieve_documents(query: str) -> list[Document]:
             logger.warning(f"No documents or metadata found for query: {query}")
             return []
 
+        def parse_metadata(meta):
+            new_meta = {}
+            for k, v in meta.items():
+                try:
+                    new_meta[k] = json.loads(v)
+                except (json.JSONDecodeError, TypeError):
+                    new_meta[k] = v
+
+            return new_meta
+
+        metadatas = [parse_metadata(m) for m in results["metadatas"][0]]
+        print(f"{metadatas}")
         return [
             Document(
                 id=id,
@@ -61,7 +84,7 @@ async def _retrieve_documents(query: str) -> list[Document]:
                 metadata=metadata,
             )
             for id, doc, metadata in zip(
-                results["ids"][0], results["documents"][0], results["metadatas"][0]
+                results["ids"][0], results["documents"][0], metadatas
             )
         ]
 
