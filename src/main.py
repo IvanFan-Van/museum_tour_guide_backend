@@ -2,24 +2,25 @@ from pathlib import Path
 import asyncio
 import os
 import traceback
-from typing import TypedDict
 import warnings
 import json
 import chromadb
 from langchain_core.runnables.schema import StreamEvent
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from openai import AsyncAzureOpenAI
 from pydantic import BaseModel
 import pydantic
 from src.graph import graph
 from src.utils import get_tts, get_logger
 from src.accumulator import AudioAccumulator
+from src.ws_schema import StatusPayload, WSStatusMessage, WSMessage
+from src.realtime_agent import realtime_agent_loop
 from api_exception import register_exception_handlers
 from dotenv import find_dotenv, load_dotenv
 
-# import .env
 load_dotenv(find_dotenv())
 
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
@@ -47,6 +48,11 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+def index():
+    return {"message": "Welcome to the Museum Tour Guide API!!!"}
+
+
 @app.get("/api/v1/health")
 def health_check():
     return {"status": "ok"}
@@ -57,19 +63,76 @@ async def error():
     raise ValueError("This is a test error endpoint.")
 
 
+async def _process_event(
+    event: StreamEvent, 
+    generator_id: str | None, 
+    queue: asyncio.Queue, 
+    acc: AudioAccumulator
+) -> str | None:
+    if generator_id is None:
+        generator_id = event['run_id'] if event['name'] == 'generator' else None
+
+    if (
+        event["event"] == "on_chat_model_stream"
+        and generator_id in event["parent_ids"]
+    ):
+        if "data" not in event or "chunk" not in event["data"]:
+            logger.error(f"No data in event: {event}")
+            return generator_id
+
+        chunk = event["data"]["chunk"].content
+        if chunk:
+            msg = {
+                "type": "text_chunk",
+                "payload": {"content": chunk, "is_final": False},
+            }
+            await queue.put(msg)
+            await acc.add_chunk(chunk)
+    elif (
+        event["event"] == "on_chat_model_end"
+        and generator_id in event["parent_ids"]
+    ):
+        await queue.put(
+            {
+                "type": "text_chunk",
+                "payload": {"content": "", "is_final": True},
+            }
+        )
+    elif (
+        event["event"] == "on_chain_start" and event["name"] == "retrieval"
+    ):
+        await queue.put(
+            WSStatusMessage(
+                payload=StatusPayload(
+                    status="retrieving",
+                    detail="Retrieving relevant documents...",
+                )
+            ).model_dump()
+        )
+    else:
+        logger.debug(f"Ignored event: {event}")
+        return generator_id
+
+    return generator_id
+
+async def _run_graph(graph_input: dict, queue: asyncio.Queue, acc: AudioAccumulator):
+    generator_id = None
+    async for event in graph.astream_events(graph_input, version="v2"):
+        generator_id = await _process_event(event, generator_id, queue, acc)
+    await acc.flush()
+
+async def _run_tts(acc: AudioAccumulator, queue: asyncio.Queue):
+    async for audio_chunk in acc:
+        await queue.put(audio_chunk)
+    await queue.put(None)  # 结束信号
+
 @app.websocket("/api/v1/invoke")
 async def invoke(websocket: WebSocket):
     await websocket.accept()
     acc = None
 
-    # 获取节点ID的辅助函数
-    def get_node_id(node_name: str, event):
-        if event["name"] == node_name:
-            return event["run_id"]
-        else:
-            return None
-
     try:
+        # 1. 数据校验
         data = await websocket.receive_json()
         query = data.get("query", None)
         doc_id = data.get("doc_id", None)
@@ -82,66 +145,24 @@ async def invoke(websocket: WebSocket):
             "doc_id": doc_id,
         }
 
-        # 结果队列, 存储任务完成后的结果
         queue = asyncio.Queue()
+        acc = AudioAccumulator(tts_function=get_tts(), num_sentence_cached=1)
 
-        tts = get_tts()
-        acc = AudioAccumulator(tts_function=tts, num_sentence_cached=1)
+        # 2. 并行执行图计算和 TTS 生成
+        graph_task = asyncio.create_task(_run_graph(graph_input, queue, acc))
+        audio_task = asyncio.create_task(_run_tts(acc, queue))
+        asyncio.gather(graph_task, audio_task)
 
-        await websocket.send_json({"event": "connected", "data": {"status": "success"}})
-
-        # 文本生成函数
-        async def text_generation_task():
-            event: StreamEvent
-            generator_id = None
-            async for event in graph.astream_events(graph_input, version="v2"):
-                if generator_id is None:
-                    generator_id = get_node_id("generator", event)
-
-                if (
-                    event["event"] == "on_chat_model_stream"
-                    and generator_id in event["parent_ids"]
-                ):
-                    if "data" not in event or "chunk" not in event["data"]:
-                        logger.error(f"No data in event: {event}")
-                        continue
-
-                    chunk = event["data"]["chunk"].content
-                    if chunk:
-                        data = {
-                            "event": "message",
-                            "data": {"chunk": chunk},
-                        }
-                        # 将结果添加到结果队列以及 accumulator 中
-                        await queue.put(data)
-                        await acc.add_chunk(chunk)
-                else:
-                    logger.debug(f"Ignored event: {event}")
-            await acc.flush()
-
-        # 音频生成任务
-        async def audio_generation_task():
-            async for audio_chunk in acc:
-                await queue.put(audio_chunk)
-
-            await queue.put(None)  # 使用 None 标记任务的结束
-
-        text_task = asyncio.create_task(text_generation_task())
-        audio_task = asyncio.create_task(audio_generation_task())
-
-        asyncio.gather(text_task, audio_task)
-
+        # 3. 返回结果
         while True:
             item = await queue.get()
             if item is None:
                 break
-
             if isinstance(item, dict):
                 await websocket.send_json(item)
             elif isinstance(item, bytes):
                 await websocket.send_bytes(item)
 
-        await websocket.send_json({"event": "done", "data": {"status": "success"}})
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected by client.")
@@ -151,12 +172,63 @@ async def invoke(websocket: WebSocket):
         logger.error(
             f"Error during WebSocket communication: {e}\n{traceback.format_exc()}"
         )
-        error_payload = {"error": type(e).__name__, "detail": str(e)}
-        await websocket.send_json({"event": "error", "data": error_payload})
+        await websocket.send_json(
+            {"event": "error", "data": {"error": type(e).__name__, "detail": str(e)}}
+        )
         if acc:
             await acc.flush()
     finally:
         await websocket.close()
+
+
+@app.websocket("/ws/realtime")
+async def websocket_realtime(websocket: WebSocket):
+    """
+    WebSocket 端点用于实时音频对话
+
+    前端发送格式:
+    1. 二进制数据: 直接发送 PCM16 音频字节
+    2. JSON 文本: {"type": "audio", "data": "base64_encoded_audio"}
+    3. 控制消息: {"type": "control", "action": "interrupt|clear_buffer"}
+
+    后端返回格式:
+    - 文本块: {"type": "text_chunk", "payload": {"content": "...", "is_final": false}}
+    - 音频块: {"type": "audio_chunk", "payload": {"audio": "base64", "format": "pcm16"}}
+    - 状态:   {"type": "status",     "payload": {"status": "...", "detail": "..."}}
+    """
+    await websocket.accept()
+
+    client = AsyncAzureOpenAI(
+        azure_endpoint=os.environ["AZURE_REALTIME_ENDPOINT"],
+        api_key=os.environ["AZURE_REALTIME_API_KEY"],
+        api_version="2024-10-01-preview",
+    )
+
+    try:
+        async for message in realtime_agent_loop(websocket, client):
+            if isinstance(message, WSMessage):
+                await websocket.send_json(message.model_dump())
+            else:
+                await websocket.send_bytes(message)
+    except WebSocketDisconnect:
+        logger.info("Realtime WebSocket disconnected by client.")
+    except Exception as e:
+        logger.error(f"Realtime WebSocket error: {e}")
+        try:
+            error_msg = WSStatusMessage(
+                payload=StatusPayload(status="error", detail=str(e))
+            )
+            await websocket.send_text(error_msg.model_dump_json())
+        except Exception:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+# --- Vector DB Setup ---
 
 
 class JSONData(BaseModel):
@@ -171,10 +243,9 @@ async def setup(reset: bool = False):
     Update the vector database from JSON files in the data directory.
 
     Args:
-        reset (bool): If True, clears the database and performs a full import.
-                      If False (default), performs an incremental update based on ID.
+        reset: If True, clears the database and performs a full import.
+               If False (default), performs an incremental update based on ID.
     """
-    # Configuration - using environment variables with defaults
     DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
     CHROMA_DB_DIR = Path(os.getenv("CHROMA_DB_DIR", "chroma_db"))
     COLLECTION_NAME = os.getenv("COLLECTION_NAME", "museum_guide")
@@ -190,31 +261,30 @@ async def setup(reset: bool = False):
             },
         )
 
+    def process_metadata(meta):
+        return {
+            k: json.dumps(v, ensure_ascii=False) if isinstance(v, (list, dict)) else v
+            for k, v in meta.items()
+        }
+
     try:
-        # Initialize Chroma Client
         client = chromadb.PersistentClient(path=CHROMA_DB_DIR)
 
-        # Handle Reset
         if reset:
             try:
                 client.delete_collection(COLLECTION_NAME)
-                logger.info(f"Deleted collection {COLLECTION_NAME}")
+                logger.info(f"Deleted collection '{COLLECTION_NAME}'")
             except ValueError:
-                pass  # Collection might not exist
+                pass
             collection = client.create_collection(name=COLLECTION_NAME)
         else:
             collection = client.get_or_create_collection(name=COLLECTION_NAME)
 
-        # Read files
-        json_files = list(DATA_DIR.rglob("*.json"))
-
-        file_data_map = {}  # Map id -> data
-
-        for file_path in json_files:
+        file_data_map = {}
+        for file_path in DATA_DIR.rglob("*.json"):
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    # Validate required fields
                     JSONData.model_validate(data)
                     file_data_map[data["id"]] = data
             except pydantic.ValidationError:
@@ -226,51 +296,40 @@ async def setup(reset: bool = False):
 
         file_ids = set(file_data_map.keys())
 
-        # Helper to process metadata (convert lists to strings for Chroma)
-        def process_metadata(meta):
-            new_meta = {}
-            for k, v in meta.items():
-                if isinstance(v, (list, dict)):
-                    new_meta[k] = json.dumps(v, ensure_ascii=False)
-                else:
-                    new_meta[k] = v
-            return new_meta
-
         if reset:
-            # Add all
             ids_to_add = list(file_ids)
             if ids_to_add:
-                documents = [file_data_map[i]["document"] for i in ids_to_add]
-                metadatas = [
-                    process_metadata(file_data_map[i]["metadata"]) for i in ids_to_add
-                ]
-                collection.add(ids=ids_to_add, documents=documents, metadatas=metadatas)  # type: ignore
-
+                collection.add(
+                    ids=ids_to_add,
+                    documents=[file_data_map[i]["document"] for i in ids_to_add],
+                    metadatas=[
+                        process_metadata(file_data_map[i]["metadata"])
+                        for i in ids_to_add
+                    ],  # type: ignore
+                )
             return {
                 "status": "success",
                 "message": f"Full reset complete. Added {len(ids_to_add)} documents.",
             }
 
         else:
-            # Incremental
             existing_ids = set(collection.get()["ids"])
-
             ids_to_delete = list(existing_ids - file_ids)
             ids_to_add = list(file_ids - existing_ids)
 
-            # Delete
             if ids_to_delete:
                 collection.delete(ids=ids_to_delete)
                 logger.info(f"Deleted {len(ids_to_delete)} documents.")
 
-            # Add
             if ids_to_add:
-                documents = [file_data_map[i]["document"] for i in ids_to_add]
-                metadatas = [
-                    process_metadata(file_data_map[i]["metadata"]) for i in ids_to_add
-                ]
-
-                collection.add(ids=ids_to_add, documents=documents, metadatas=metadatas)  # type: ignore
+                collection.add(
+                    ids=ids_to_add,
+                    documents=[file_data_map[i]["document"] for i in ids_to_add],
+                    metadatas=[
+                        process_metadata(file_data_map[i]["metadata"])
+                        for i in ids_to_add
+                    ],  # type: ignore
+                )
                 logger.info(f"Added {len(ids_to_add)} documents.")
 
             return {

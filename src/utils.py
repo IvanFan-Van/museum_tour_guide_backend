@@ -1,4 +1,3 @@
-from email.mime import image
 import os
 import re
 from dotenv import load_dotenv, find_dotenv
