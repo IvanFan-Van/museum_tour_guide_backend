@@ -1,12 +1,10 @@
-"""定义检索图子图 - 包含检索和重排序节点"""
+"""检索工具与底层检索实现"""
 
 import asyncio
 import json
 from multiprocessing import Value
-from langgraph.graph import START, StateGraph, END
 from langchain_core.documents import Document
 from chromadb import PersistentClient
-from src.models import State
 from src.utils import get_logger
 import requests
 import os
@@ -15,7 +13,6 @@ from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
 logger = get_logger()
-workflow = StateGraph(State)
 
 # 全局客户端，避免重复初始化
 _client = None
@@ -154,17 +151,11 @@ async def _rerank_documents(query: str, docs: list[Document]) -> list[Document]:
     return await asyncio.to_thread(_rerank_documents_sync)
 
 
-async def retrieve(state: State):
-    """检索节点 - 根据用户消息检索相关文档"""
-    # 如果 state 中有 doc_id，直接根据 ID 检索
-    if state.get("doc_id", None) and state["doc_id"] != "null":
-        docs = await _retrieve_by_id(state["doc_id"])  # type: ignore
-        return {"docs": docs}
-
-    # 否则根据消息内容检索
-    query = state["messages"][-1].content
-    if not isinstance(query, str):
-        raise ValueError(f"The latest message content must be a string. {query}")
+async def retrieve_docs(query: str, doc_id: str | None = None) -> list[Document]:
+    """检索文档"""
+    if doc_id and doc_id != "null":
+        docs = await _retrieve_by_id(doc_id)
+        return docs
 
     docs = await _retrieve_documents(query)
     # TODO change "name" to "source"
@@ -178,29 +169,19 @@ async def retrieve(state: State):
         )
     )
 
-    return {"docs": docs}
+    return docs
 
 
-async def rerank(state: State):
-    """重排序节点 - 对检索到的文档进行重排序"""
-    docs = state.get("docs", [])
+async def rerank_docs(
+    query: str, docs: list[Document], doc_id: str | None = None
+) -> list[Document]:
+    """重排序文档"""
     if not docs:
-        return {"docs": []}
+        return []
 
-    if state.get("doc_id") and len(docs) == 1:
-        logger.info(
-            f"Single document retrieved by ID {state['doc_id']}, skipping rerank."
-        )
-        return {"docs": docs}
-
-    query = state["messages"][-1].content
-
-    if not isinstance(query, str):
-        raise ValueError(f"The latest message content must be a string. {query}")
-
-    docs = state.get("docs", [])
-    if not docs:
-        return {"docs": []}
+    if doc_id and len(docs) == 1:
+        logger.info(f"Single document retrieved by ID {doc_id}, skipping rerank.")
+        return docs
     ranked_docs = await _rerank_documents(query, docs)
 
     # expected logging: Reranked documents for query - "What is the history of...":
@@ -215,13 +196,10 @@ async def rerank(state: State):
             ]
         )
     )
-    return {"docs": ranked_docs}
+    return ranked_docs
 
 
-workflow.add_node("retrieve", retrieve)
-workflow.add_node("rerank", rerank)
-
-workflow.add_edge(START, "retrieve")
-workflow.add_edge("retrieve", "rerank")
-workflow.add_edge("rerank", END)
-retrieval_graph = workflow.compile()
+async def db_retrieve(query: str, doc_id: str | None = None) -> list[Document]:
+    """Tool entrypoint: retrieve + rerank documents."""
+    docs = await retrieve_docs(query=query, doc_id=doc_id)
+    return await rerank_docs(query=query, docs=docs, doc_id=doc_id)

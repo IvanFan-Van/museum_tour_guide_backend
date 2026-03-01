@@ -7,9 +7,14 @@ from pydantic import BaseModel
 # --- Payload 类型 ---
 
 
+# --- Payload 类型 ---
+
+
 class QueryPayload(BaseModel):
     text: str
     images: list[dict[Literal["format", "data"], str]]
+    section_idx: int | None = None
+    language: Literal["en", "zh"] = "en"
 
 
 class TextChunkPayload(BaseModel):
@@ -29,6 +34,13 @@ class StatusPayload(BaseModel):
 ArtifactPayload = Dict[str, Any]
 
 
+class ArtifactResultPayload(BaseModel):
+    """Graph 执行完成后返回的结构化产物，包括图像和参考链接"""
+
+    images: list[str] = []
+    references: list[str] = []
+
+
 # --- 消息类型 ---
 
 
@@ -42,9 +54,9 @@ class WSTextChunkMessage(BaseModel):
     payload: TextChunkPayload
 
 
-class WSControlMessage(BaseModel):
-    type: Literal["control"] = "control"
-    payload: ControlPayload
+# class WSControlMessage(BaseModel):
+#     type: Literal["control"] = "control"
+#     payload: ControlPayload
 
 
 class WSStatusMessage(BaseModel):
@@ -53,16 +65,21 @@ class WSStatusMessage(BaseModel):
 
 
 class WSArtifactMessage(BaseModel):
-    type: Literal["artifact"] = "artifact"
-    payload: ArtifactPayload
+    """Graph 执行结束后一次性发送的产物消息（图像路径、参考链接）"""
 
+    type: Literal["artifact"] = "artifact"
+    payload: ArtifactResultPayload
+
+
+WSTextMessage = Union[
+    WSQueryMessage,
+    WSTextChunkMessage,
+    WSStatusMessage,
+    WSArtifactMessage,
+    # WSControlMessage
+]
+WSByteMessage = bytes
 
 # --- 联合类型 ---
 
-WSMessage = Union[
-    WSQueryMessage,
-    WSTextChunkMessage,
-    WSControlMessage,
-    WSStatusMessage,
-    WSArtifactMessage,
-]
+WSMessage = Union[WSTextMessage, WSByteMessage]

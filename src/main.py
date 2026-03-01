@@ -5,7 +5,6 @@ import traceback
 import warnings
 import json
 import chromadb
-from langchain_core.runnables.schema import StreamEvent
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,10 +15,11 @@ import pydantic
 from src.graph import graph
 from src.utils import get_tts, get_logger
 from src.accumulator import AudioAccumulator
-from src.ws_schema import StatusPayload, WSStatusMessage, WSMessage
+from src.ws_schema import StatusPayload, WSStatusMessage, WSMessage, WSTextChunkMessage
 from src.realtime_agent import realtime_agent_loop
 from api_exception import register_exception_handlers
 from dotenv import find_dotenv, load_dotenv
+from src.agent import AgentInput, LangGraphAgent
 
 load_dotenv(find_dotenv())
 
@@ -34,6 +34,8 @@ app = FastAPI(
     description="API for the Museum Tour Guide application using RAG with LangGraph and LangChain",
     version="1.0.0",
 )
+
+agent = LangGraphAgent(graph)
 
 register_exception_handlers(app, log_traceback=False, log=True)
 
@@ -63,68 +65,22 @@ async def error():
     raise ValueError("This is a test error endpoint.")
 
 
-async def _process_event(
-    event: StreamEvent, 
-    generator_id: str | None, 
-    queue: asyncio.Queue, 
-    acc: AudioAccumulator
-) -> str | None:
-    if generator_id is None:
-        generator_id = event['run_id'] if event['name'] == 'generator' else None
-
-    if (
-        event["event"] == "on_chat_model_stream"
-        and generator_id in event["parent_ids"]
-    ):
-        if "data" not in event or "chunk" not in event["data"]:
-            logger.error(f"No data in event: {event}")
-            return generator_id
-
-        chunk = event["data"]["chunk"].content
-        if chunk:
-            msg = {
-                "type": "text_chunk",
-                "payload": {"content": chunk, "is_final": False},
-            }
-            await queue.put(msg)
-            await acc.add_chunk(chunk)
-    elif (
-        event["event"] == "on_chat_model_end"
-        and generator_id in event["parent_ids"]
-    ):
-        await queue.put(
-            {
-                "type": "text_chunk",
-                "payload": {"content": "", "is_final": True},
-            }
-        )
-    elif (
-        event["event"] == "on_chain_start" and event["name"] == "retrieval"
-    ):
-        await queue.put(
-            WSStatusMessage(
-                payload=StatusPayload(
-                    status="retrieving",
-                    detail="Retrieving relevant documents...",
-                )
-            ).model_dump()
-        )
-    else:
-        logger.debug(f"Ignored event: {event}")
-        return generator_id
-
-    return generator_id
-
-async def _run_graph(graph_input: dict, queue: asyncio.Queue, acc: AudioAccumulator):
-    generator_id = None
-    async for event in graph.astream_events(graph_input, version="v2"):
-        generator_id = await _process_event(event, generator_id, queue, acc)
+async def _run_agent(
+    agent_input: AgentInput, queue: asyncio.Queue, acc: AudioAccumulator
+):
+    async for message in agent.stream(agent_input):
+        await queue.put(message.model_dump())
+        if isinstance(message, WSTextChunkMessage):
+            if message.payload.content and not message.payload.is_final:
+                await acc.add_chunk(message.payload.content)
     await acc.flush()
+
 
 async def _run_tts(acc: AudioAccumulator, queue: asyncio.Queue):
     async for audio_chunk in acc:
         await queue.put(audio_chunk)
     await queue.put(None)  # 结束信号
+
 
 @app.websocket("/api/v1/invoke")
 async def invoke(websocket: WebSocket):
@@ -140,16 +96,13 @@ async def invoke(websocket: WebSocket):
         if not query:
             raise ValueError("Query parameter is required.")
 
-        graph_input = {
-            "messages": [{"role": "user", "content": query}],
-            "doc_id": doc_id,
-        }
+        agent_input = AgentInput(query=query, section_idx=doc_id)
 
         queue = asyncio.Queue()
         acc = AudioAccumulator(tts_function=get_tts(), num_sentence_cached=1)
 
         # 2. 并行执行图计算和 TTS 生成
-        graph_task = asyncio.create_task(_run_graph(graph_input, queue, acc))
+        graph_task = asyncio.create_task(_run_agent(agent_input, queue, acc))
         audio_task = asyncio.create_task(_run_tts(acc, queue))
         asyncio.gather(graph_task, audio_task)
 
@@ -162,7 +115,6 @@ async def invoke(websocket: WebSocket):
                 await websocket.send_json(item)
             elif isinstance(item, bytes):
                 await websocket.send_bytes(item)
-
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected by client.")

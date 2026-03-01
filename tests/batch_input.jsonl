@@ -1,0 +1,14 @@
+// Thread 1：中文连续追问（中国瓷器）
+{"query": "你可以介绍一下中国瓷器吗", "language": "zh", "section_idx": null}
+{"query": "青花瓷是什么时候发展起来的？", "language": "zh", "section_idx": null}
+{"query": "它的制作工艺有哪些特点？", "language": "zh", "section_idx": null}
+
+
+// Thread 2：英文单次查询（丝绸）
+{"query": "Tell me about Chinese silk art", "language": "en", "section_idx": null}
+{"query": "What are the main weaving techniques used in pictorial silk?", "language": "en", "section_idx": null}
+
+
+// Thread 3：中文，指定 section
+{"query": "这个展品的背景是什么？", "language": "zh", "section_idx": 80}
+{"query": "可以告诉我更多关于它的历史吗？", "language": "zh", "section_idx": null}

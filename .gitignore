@@ -12,3 +12,5 @@ chroma_db/
 .langgraph_api/
 dev_log/
 .env
+
+tests/*.md
