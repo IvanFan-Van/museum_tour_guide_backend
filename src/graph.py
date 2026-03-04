@@ -1,6 +1,8 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv, find_dotenv
 import json
+import yaml
 import requests
 from langchain_core.messages import AIMessage, ToolMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -15,14 +17,29 @@ from langgraph.graph.message import add_messages
 
 load_dotenv(find_dotenv(), override=True)
 
+# ── 加载配置文件 ────────────────────────────────────────────
+_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
+with open(_CONFIG_PATH, "r", encoding="utf-8") as _f:
+    _cfg = yaml.safe_load(_f)
+
 # ── SiliconFlow API 配置 ────────────────────────────────────
 SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY", "")
-SILICONFLOW_BASE_URL = "https://api.siliconflow.cn/v1"
-EMBED_MODEL = "Qwen/Qwen3-Embedding-0.6B"
-RERANK_MODEL = "Qwen/Qwen3-Reranker-0.6B"
-RERANK_INSTRUCTION = (
-    "Given a museum gallery query, retrieve relevant passages that answer the query"
-)
+SILICONFLOW_BASE_URL = _cfg["siliconflow"]["base_url"]
+EMBED_MODEL = _cfg["siliconflow"]["embed_model"]
+RERANK_MODEL = _cfg["siliconflow"]["rerank_model"]
+RERANK_INSTRUCTION = _cfg["siliconflow"]["rerank_instruction"]
+_EMBED_TIMEOUT = _cfg["siliconflow"]["timeout"]["embed"]
+_RERANK_TIMEOUT = _cfg["siliconflow"]["timeout"]["rerank"]
+
+# ── 检索参数 ────────────────────────────────────────────────
+_MATCH_COUNT = _cfg["retrieval"]["match_count"]
+_RERANK_THRESHOLD = _cfg["retrieval"]["rerank_threshold"]
+_RERANK_TOP_K = _cfg["retrieval"]["rerank_top_k"]
+
+# ── Supabase 表 / RPC 名称 ──────────────────────────────────
+_TBL_SECTIONS = _cfg["supabase"]["tables"]["sections"]
+_TBL_IMAGES = _cfg["supabase"]["tables"]["images"]
+_RPC_MATCH = _cfg["supabase"]["rpc"]["match_paragraphs"]
 
 _sf_headers = {
     "Authorization": f"Bearer {SILICONFLOW_API_KEY}",
@@ -60,14 +77,14 @@ def get_embedding(text: str) -> list[float]:
         f"{SILICONFLOW_BASE_URL}/embeddings",
         headers=_sf_headers,
         json={"model": EMBED_MODEL, "input": text, "encoding_format": "float"},
-        timeout=30,
+        timeout=_EMBED_TIMEOUT,
     )
     resp.raise_for_status()
     return resp.json()["data"][0]["embedding"]
 
 
 def rerank_documents(
-    query: str, documents: list[str], threshold: float = 0.3
+    query: str, documents: list[str], threshold: float = _RERANK_THRESHOLD
 ) -> list[str]:
     """调用 SiliconFlow Rerank API，返回相关性得分超过阈值的文档（按得分降序）。"""
     if not documents:
@@ -82,7 +99,7 @@ def rerank_documents(
             "instruction": RERANK_INSTRUCTION,
             "return_documents": False,
         },
-        timeout=60,
+        timeout=_RERANK_TIMEOUT,
     )
     resp.raise_for_status()
     results = resp.json()["results"]  # [{"index": int, "relevance_score": float}, ...]
@@ -94,12 +111,12 @@ def rerank_documents(
 def retrieve_node(state: AgentState):
     """Subgraph 节点 1：向量召回，记录文档与 page_idx 的对应关系"""
     query = state["current_query"]
-    language = state.get("language", "zh")
+    language = state.get("language", "en")
     text_field = "zh_text" if language == "zh" else "en_text"
 
     embeddings = get_embedding(query)
     results = supabase.rpc(
-        "match_paragraphs_any", {"query_embedding": embeddings, "match_count": 5}
+        _RPC_MATCH, {"query_embedding": embeddings, "match_count": _MATCH_COUNT}
     ).execute()
 
     if not results.data:
@@ -108,7 +125,7 @@ def retrieve_node(state: AgentState):
     rpc_data = cast(list[dict[str, Any]], results.data)
     section_idxs = list(set(item["section_idx"] for item in rpc_data))
     sections = (
-        supabase.table("sections")
+        supabase.table(_TBL_SECTIONS)
         .select(f"{text_field}, page_idx")
         .in_("section_idx", section_idxs)
         .execute()
@@ -127,7 +144,7 @@ def rerank_node(state: AgentState):
     page_idxs = state.get("retrieved_page_idxs", [])
     call_id = state["tool_call_id"]
 
-    final_docs = rerank_documents(query, docs)[:2]
+    final_docs = rerank_documents(query, docs)[:_RERANK_TOP_K]
 
     # 若精排后没有高置信度文档，返回明确的空结果信号，让 LLM 知道需要 fallback
     if final_docs:
@@ -137,7 +154,7 @@ def rerank_node(state: AgentState):
             set(doc_to_page[doc] for doc in final_docs if doc in doc_to_page)
         )
         images_result = (
-            supabase.table("images")
+            supabase.table(_TBL_IMAGES)
             .select("image_path")
             .in_("page_idx", final_page_idxs)
             .execute()
@@ -185,9 +202,11 @@ rag_subgraph_builder.set_finish_point("rerank")
 rag_subgraph = rag_subgraph_builder.compile()  # 编译为可复用的 Runnable
 
 # ── 工具定义 ────────────────────────────────────────────────
-search = DuckDuckGoSearchResults(output_format="list", num_results=1)
+search = DuckDuckGoSearchResults(
+    output_format="list", num_results=_cfg["web_search"]["num_results"]
+)
 llm = AzureChatOpenAI(
-    model="gpt-4o", api_version=os.getenv("AZURE_OPENAI_API_VERSION", "")
+    model=_cfg["llm"]["model"], api_version=os.getenv("AZURE_OPENAI_API_VERSION", "")
 )
 
 
@@ -250,7 +269,7 @@ def retrieve_section_node(state: AgentState):
     text_field = "zh_text" if language == "zh" else "en_text"
 
     section_result = (
-        supabase.table("sections")
+        supabase.table(_TBL_SECTIONS)
         .select(f"{text_field}, page_idx")
         .eq("section_idx", section_idx_arg)
         .execute()
@@ -271,7 +290,7 @@ def retrieve_section_node(state: AgentState):
         page_idx = row["page_idx"]
 
         images_result = (
-            supabase.table("images")
+            supabase.table(_TBL_IMAGES)
             .select("image_path")
             .eq("page_idx", page_idx)
             .execute()

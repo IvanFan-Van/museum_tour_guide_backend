@@ -1,6 +1,6 @@
 import asyncio
 import re
-from typing import AsyncIterator, Callable, List, Optional
+from typing import AsyncIterator, Callable, Optional
 from asyncio import Queue
 from src.utils import get_logger
 

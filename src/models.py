@@ -1,28 +1,79 @@
-"""定义数据模型"""
+"""WebSocket 消息的 Pydantic 模型定义"""
 
-from typing import Annotated, TypedDict
-from langchain_core.documents import Document
-from langchain_core.messages import AnyMessage
-from langgraph.graph.message import add_messages
-from pydantic import BaseModel, Field
+from typing import Dict, Any, Literal, Union
+from pydantic import BaseModel
 
 
-class State(TypedDict):
-    messages: Annotated[list[AnyMessage], add_messages]
-    need_rag: bool
-    docs: list[Document]
-    doc_id: str | None  # QR Code 返回的文档 ID
-    tool_name: str | None
-    tool_args: dict | None
-    route_reason: str | None
+# --- Payload 类型 ---
 
 
-class RouteDecision(BaseModel):
-    should_call: bool = Field(description="Whether to call a tool for this query")
-    tool_name: str | None = Field(
-        default=None, description="Tool name to call when should_call is True"
-    )
-    arguments: dict | None = Field(
-        default=None, description="Arguments for the tool call"
-    )
-    reason: str = Field(description="Briefly explain the criteria for judgment")
+class QueryPayload(BaseModel):
+    text: str
+    images: list[dict[Literal["format", "data"], str]]
+    section_idx: int | None = None
+    language: Literal["en", "zh"] = "en"
+
+
+class TextChunkPayload(BaseModel):
+    content: str
+    is_final: bool
+
+
+class ControlPayload(BaseModel):
+    action: str
+
+
+class StatusPayload(BaseModel):
+    status: str
+    detail: str
+
+
+class ArtifactPayload(BaseModel):
+    """Graph 执行完成后返回的结构化产物，包括图像和参考链接"""
+
+    images: list[str] = []
+    references: list[str] = []
+
+
+# --- 消息类型 ---
+
+
+class WSQueryMessage(BaseModel):
+    type: Literal["query"] = "query"
+    payload: QueryPayload
+
+
+class WSTextChunkMessage(BaseModel):
+    type: Literal["text_chunk"] = "text_chunk"
+    payload: TextChunkPayload
+
+
+class WSControlMessage(BaseModel):
+    type: Literal["control"] = "control"
+    payload: ControlPayload
+
+
+class WSStatusMessage(BaseModel):
+    type: Literal["status"] = "status"
+    payload: StatusPayload
+
+
+class WSArtifactMessage(BaseModel):
+    """Graph 执行结束后一次性发送的产物消息（图像路径、参考链接）"""
+
+    type: Literal["artifact"] = "artifact"
+    payload: ArtifactPayload
+
+
+WSTextMessage = Union[
+    WSQueryMessage,
+    WSTextChunkMessage,
+    WSStatusMessage,
+    WSArtifactMessage,
+    WSControlMessage,
+]
+WSByteMessage = bytes
+
+# --- 联合类型 ---
+
+WSMessage = Union[WSTextMessage, WSByteMessage]

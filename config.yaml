@@ -1,0 +1,28 @@
+# ── Museum Tour Guide - Backend Configuration ──────────────────────────────
+
+siliconflow:
+  base_url: "https://api.siliconflow.cn/v1"
+  embed_model: "Qwen/Qwen3-Embedding-0.6B"
+  rerank_model: "Qwen/Qwen3-Reranker-0.6B"
+  rerank_instruction: "Given a museum gallery query, retrieve relevant passages that answer the query"
+  timeout:
+    embed: 30    # seconds
+    rerank: 60   # seconds
+
+retrieval:
+  match_count: 5          # number of candidate docs fetched from vector DB
+  rerank_threshold: 0.3   # minimum relevance score for a doc to be kept
+  rerank_top_k: 2         # maximum number of docs kept after reranking
+
+web_search:
+  num_results: 5          # number of DuckDuckGo results to return
+
+llm:
+  model: "gpt-4o"
+
+supabase:
+  tables:
+    sections: "sections"
+    images: "images"
+  rpc:
+    match_paragraphs: "match_paragraphs_any"

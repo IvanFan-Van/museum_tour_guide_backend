@@ -8,16 +8,16 @@
 
 运行方法：
   # 单次流式测试（默认）
-  python tests/test_api_run.py
+  uv run tests/test_api_run.py
 
   # 单次同步等待测试
-  python tests/test_api_run.py --mode wait
+  uv run tests/test_api_run.py --mode wait
 
   # 批量测试（从 jsonl 文件读取）
-  python tests/test_api_run.py --batch tests/batch_input.jsonl
+  uv run tests/test_api_run.py --batch tests/batch_input.jsonl
 
   # 批量测试并指定输出文件
-  python tests/test_api_run.py --batch tests/batch_input.jsonl --output results.md
+  uv run tests/test_api_run.py --batch tests/batch_input.jsonl --output results.md
 
 JSONL 文件格式：
   - 每行一个 JSON 对象，含 query / language / section_idx 三个字段
@@ -381,6 +381,8 @@ if __name__ == "__main__":
 
     # 单次同步等待
     python tests/test_api_run.py --mode wait
+
+    # batch 格式: 使用 \n\n 分隔每个 Thread
     """
     parser = argparse.ArgumentParser(description="LangGraph API 测试脚本")
     parser.add_argument(

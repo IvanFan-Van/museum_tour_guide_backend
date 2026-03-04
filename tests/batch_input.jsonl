@@ -12,3 +12,18 @@
 // Thread 3：中文，指定 section
 {"query": "这个展品的背景是什么？", "language": "zh", "section_idx": 80}
 {"query": "可以告诉我更多关于它的历史吗？", "language": "zh", "section_idx": null}
+
+
+// Thread 4：中文，指定 section
+{"query": "这个展品的背景是什么？", "language": "zh", "section_idx": 50}
+{"query": "可以告诉我更多关于它的历史吗？", "language": "zh", "section_idx": null}
+
+
+// Thread 5：英文，指定 section
+{"query": "What's the background of this artifact?", "language": "en", "section_idx": 72}
+{"query": "Can you tell me more about its history?", "language": "en", "section_idx": null}
+
+
+// Thread 6：英文，指定 section
+{"query": "What's the background of this artifact?", "language": "en", "section_idx": 85}
+{"query": "Can you tell me more about its history?", "language": "en", "section_idx": null}
