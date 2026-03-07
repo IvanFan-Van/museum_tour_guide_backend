@@ -13,4 +13,3 @@ chroma_db/
 dev_log/
 .env
 tests/*.md
-static/
