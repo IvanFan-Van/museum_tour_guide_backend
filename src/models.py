@@ -1,6 +1,7 @@
 """WebSocket 消息的 Pydantic 模型定义"""
 
 from typing import Dict, Any, Literal, Union
+import uuid
 from pydantic import BaseModel
 
 
@@ -8,9 +9,10 @@ from pydantic import BaseModel
 
 
 class QueryPayload(BaseModel):
-    text: str
+    query: str
     images: list[dict[Literal["format", "data"], str]]
-    section_idx: int | None = None
+    session_id: uuid.UUID
+    doc_id: int | None = None
     language: Literal["en", "zh"] = "en"
 
 

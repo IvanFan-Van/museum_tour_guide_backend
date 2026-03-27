@@ -23,7 +23,9 @@ with open(_CONFIG_PATH, "r", encoding="utf-8") as _f:
     _cfg = yaml.safe_load(_f)
 
 # ── SiliconFlow API 配置 ────────────────────────────────────
-SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY", "")
+SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY", None)
+if SILICONFLOW_API_KEY is None:
+    raise ValueError("SILICONFLOW_API_KEY is not set in environment variables.")
 SILICONFLOW_BASE_URL = _cfg["siliconflow"]["base_url"]
 EMBED_MODEL = _cfg["siliconflow"]["embed_model"]
 RERANK_MODEL = _cfg["siliconflow"]["rerank_model"]
@@ -40,15 +42,19 @@ _RERANK_TOP_K = _cfg["retrieval"]["rerank_top_k"]
 _TBL_SECTIONS = _cfg["supabase"]["tables"]["sections"]
 _TBL_IMAGES = _cfg["supabase"]["tables"]["images"]
 _RPC_MATCH = _cfg["supabase"]["rpc"]["match_paragraphs"]
+SUPABASE_URL = os.environ.get("SUPABASE_URL", None)
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", None)
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError(
+        "SUPABASE_URL and SUPABASE_KEY must be set in environment variables."
+    )
 
 _sf_headers = {
     "Authorization": f"Bearer {SILICONFLOW_API_KEY}",
     "Content-Type": "application/json",
 }
 
-supabase: Client = create_client(
-    os.environ.get("SUPABASE_URL", ""), os.environ.get("SUPABASE_KEY", "")
-)
+supabase: Client = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
 
 # ── State 定义 ──────────────────────────────────────────────
