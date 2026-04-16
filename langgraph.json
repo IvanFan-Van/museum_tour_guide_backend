@@ -7,5 +7,13 @@
     },
     "env": ".env",
     "python_version": "3.12",
-    "image_distro": "wolfi"
+    "image_distro": "wolfi",
+    "http": {
+	   "cors": {
+		   "origins": ["https://smith.langchain.com"], 
+		   "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+		   "allow_headers": ["*"],
+		   "allow_credentials": true
+	  }
+    }
 }

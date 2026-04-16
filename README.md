@@ -1,4 +1,4 @@
-GETTING START
+# GETTING START
 
 Build pyproject environment
 ```bash
@@ -52,3 +52,17 @@ uvicorn src.main:app --reload
 - LangGraphAgent: LangGraph Implemetation
 
 **accumulator.py**: Define text to speech service, independent component
+
+# USEABLE COMMANDS
+
+## zrok service related commands 
+```bash
+zrok2 agent status # check zrok service
+zrok2 agent start # start zrok agent service
+zrok2 agent stop # stop zrok agent service
+```
+you can check zrok agent console on address: "http://47.236.240.233:8889"
+
+> Remind: zrok agent default listen to 8888 port. And nginx config at "./nginx.conf" to transport request that accesses 8889 to zrok console. Therefore, if you want to change access port. Please update nginx config and aliyun server port.
+
+makesure /etc/nginx/nginx.conf set user to be innowing so that it can access to the ./frontend/dist folder
