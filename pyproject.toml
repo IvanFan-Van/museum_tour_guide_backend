@@ -58,3 +58,8 @@ include = ["src"]
 pythonVersion = "3.12"
 venv = ".venv"
 venvPath = "."
+
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "C90", "B", "B9", "S"]
+ignore = ["E501"]

@@ -250,6 +250,10 @@ class LangGraphRemoteAgent(BaseAgent):
                     if message is not None:
                         yield message
 
+                if chunk.event == "error":
+                    error_detail = f"{chunk.data.get('error', 'Unknown error')}: {chunk.data.get('message')}"
+                    raise Exception(f"LangGraph execution error: {error_detail}")
+
         except Exception as exc:
             logger.error(
                 f"LangGraphRemoteAgent encountered an error: {exc}\n{traceback.format_exc()}"
